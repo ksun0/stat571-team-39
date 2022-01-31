@@ -93,6 +93,15 @@ We requested that only people in United States answer the questions. Each person
 
 The raw data is stored as `Survey_results_final.csv` on Canvas.
 
+```{r librarysetup}
+library(dplyr)
+library(ggplot2)
+library(dplyr)
+library(grid)
+library(ggplot2)
+library(lattice)
+```
+
 ## Data preparation
 
 i. We need to clean and select only the variables of interest. 
@@ -106,29 +115,131 @@ ii. Handle missing/wrongly filled values of the selected variables
 As in real world data with user input, the data is incomplete, with missing values, and has incorrect responses. There is no general rule for dealing with these problems beyond “use common sense.” In whatever case, explain what the problems were and how you addressed them. Be sure to explain your rationale for your chosen methods of handling issues with the data. Do not use Excel for this, however tempting it might be.
 
 Tip: Reflect on the reasons for which data could be wrong or missing. How would you address each case? For this homework, if you are trying to predict missing values with regression, you are definitely overthinking. Keep it simple.
+```{r question1.1, echo=TRUE, message=FALSE, warning=FALSE}
 
-iii. Brief summary 
-
-Write a brief report to summarize all the variables collected. Include both summary statistics (including sample size) and graphical displays such as histograms or bar charts where appropriate. Comment on what you have found from this sample. (For example - it's very interesting to think about why would one work for a job that pays only 10cents/each survey? Who are those survey workers? The answer may be interesting even if it may not directly relate to our goal.)
-
-```{r question1, echo=TRUE}
 rawdatasurvey <- read.csv("data/Survey_results_final.csv", header=T, stringsAsFactors = FALSE)
-keptvars <- c("Answer.Age", "Answer.Gender", "Answer.Education", "Answer.HouseHoldIncome", "Answer.Sirius.Radio", "Answer.Wharton.Radio", "WorkTimeInSeconds")
+keptvars <- c("Answer.Age", "Answer.Gender", "Answer.Education", 
+              "Answer.HouseHoldIncome", "Answer.Sirius.Radio",
+              "Answer.Wharton.Radio","WorkTimeInSeconds")
 datasurvey <- rawdatasurvey[keptvars]
 
-datasurvey <- datasurvey %>% rename(age = Answer.Age, gender = Answer.Gender, education = Answer.Education, income = Answer.HouseHoldIncome, sirius = Answer.Sirius.Radio, wharton = Answer.Wharton.Radio, worktime = WorkTimeInSeconds)
+datasurvey <- datasurvey %>% rename(age = Answer.Age, gender = Answer.Gender, 
+                                    education = Answer.Education, income = Answer.HouseHoldIncome,
+                                    sirius = Answer.Sirius.Radio, wharton = Answer.Wharton.Radio,
+                                    worktime = WorkTimeInSeconds)
 
-# remove people too young or old, non numeric ages, too fast submissions low-quality, remove no income
+# remove people too young or old, non numeric ages, too fast submissions low-quality, remove no income, no responce to key survey question, and people that listen on other platforms
 
 datasurvey <- mutate(datasurvey, age = as.numeric(age))
 datasurvey <- filter(datasurvey, age >= 10 & age <= 110 & worktime >= 7 & !is.na(age))
 datasurvey <- datasurvey[-which(datasurvey$income == ""), ]
 datasurvey <- datasurvey[-which(datasurvey$gender == ""), ]
+datasurvey <- datasurvey[-which(datasurvey$sirius == ""), ]
+datasurvey <- datasurvey[-which(datasurvey$wharton == ""), ] 	
+datasurvey <- datasurvey[-which(datasurvey$education == "select one"), ]
+datasurvey <- datasurvey[-which(datasurvey$wharton == "Yes" & datasurvey$sirius == "No"), ]
+```
+## Data preperation RESPONSE
 
+To clean the data, people too old (>110) and too young (<10) were removed. Furthermore, people without a numeric age were removed. Samples that were too quick (<7seconds) were also removed due to the likely low-quality of their responses. Incomplete entries in the other columns were removed, in addition to people that claimed to listen to the Wharton station without listening to SiriusXM.
+
+```{r question1, echo=TRUE, message=FALSE, warning=FALSE}
 
 summary(datasurvey)
 
 ```
+
+
+iii. Brief summary 
+
+Write a brief report to summarize all the variables collected. Include both summary statistics (including sample size) and graphical displays such as histograms or bar charts where appropriate. Comment on what you have found from this sample. (For example - it's very interesting to think about why would one work for a job that pays only 10cents/each survey? Who are those survey workers? The answer may be interesting even if it may not directly relate to our goal.)
+
+1. Sample Size = 1723
+
+
+```{r question1plots, echo=TRUE, message=FALSE, warning=FALSE}
+p1 <- ggplot(datasurvey) +
+geom_histogram(aes(x = age), count = 5) +
+labs( title = "Histogram of Age", x = "Age" , y = "Frequency", fill= "blue")
+
+p1 + theme(text = element_text(size = 12))
+
+incomedf <- as.data.frame(table(datasurvey$income))
+incomedf <- incomedf[c(6, 1:5), ] # new order
+
+
+incomedf <- as.data.frame(table(datasurvey$income))
+incomedf <- incomedf %>% rename(income = Var1, count = Freq)
+incomedf <- incomedf[c(6, 1:5), ] # new order
+incomedf <- incomedf %>% mutate(percent = count / sum(incomedf$count))
+incomedf
+
+genderdf <- as.data.frame(table(datasurvey$gender))
+genderdf <- genderdf %>% rename(gender = Var1, count = Freq)
+genderdf <- genderdf %>% mutate(percent = count / sum(genderdf$count))
+genderdf
+
+
+medianage <- median(datasurvey$age)
+medianage
+
+edudf <- as.data.frame(table(datasurvey$education))
+edudf <- edudf %>% rename(education = Var1, count = Freq)
+edudf <- edudf %>% mutate(percent = count / sum(genderdf$count))
+edudf
+
+
+```
+
+
+```{r whartonreach, echo=TRUE, message=FALSE, warning=FALSE}
+
+
+
+genderratedf <-datasurvey %>%
+  group_by(gender) %>%
+  summarise(
+    count = sum(age != 0),
+    sirius_count = sum(sirius == 'Yes'),
+    wharton_count = sum(sirius == 'Yes' & wharton == 'Yes'))
+
+incomeratedf <-datasurvey %>%
+  group_by(income) %>%
+  summarise(
+    count = sum(age != 0),
+    sirius_count = sum(sirius == 'Yes'),
+    wharton_count = sum(sirius == 'Yes' & wharton == 'Yes'))
+
+ageratedf <-datasurvey %>%
+  group_by(gr=cut(age, breaks= seq(0, 100, by = 10)) ) %>% 
+     summarise(count= n(), sirius_count = sum(sirius == 'Yes'),
+    wharton_count = sum(sirius == 'Yes' & wharton == 'Yes'))%>%
+     arrange(as.numeric(gr))
+
+genderratedf <- genderratedf %>% mutate(siriuspct = sirius_count / count)
+genderratedf <- genderratedf %>% mutate(whartonshare = wharton_count / sirius_count)
+genderratedf
+
+incomeratedf <- incomeratedf %>% mutate(siriuspct = sirius_count / count)
+incomeratedf <- incomeratedf[c(6, 1:5), ] # new order
+incomeratedf <- incomeratedf %>% mutate(whartonshare = wharton_count / sirius_count)
+incomeratedf
+
+
+ageratedf <- ageratedf %>% mutate(siriuspct = sirius_count / count)
+ageratedf <- ageratedf %>% mutate(whartonshare = wharton_count / sirius_count)
+ageratedf
+
+#sirius reaches femals and males equally if similar age distributions
+#looks like way more men listen to wharton than females
+whartonspct <- sum(incomeratedf$wharton_count) / sum(incomeratedf$count)
+whartonspct
+
+whartonpctofsirius <- sum(incomeratedf$wharton_count) / sum(incomeratedf$sirius_count)
+whartonpctofsirius
+
+```
+
 
 ## Sample properties
 
@@ -138,6 +249,20 @@ i. Does this sample appear to be a random sample from the general population of 
 ii. Does this sample appear to be a random sample from the MTURK population?
 
 Note: You can not provide evidence by simply looking at our data here. For example, you need to find distribution of education in our age group in US to see if the two groups match in distribution. You may need to gather some background information about the MTURK population to have a slight sense if this particular sample seem to a random sample from there... Please do not spend too much time gathering evidence. 
+
+## (2.2) Sample properties RESPONSE
+
+From visual inspection of the histogram of survey respondent ages, the sample from this survey is skewed towards younger people. The median age of people in America in 2014 was 37.4 years [1], while the median age of survey respondents was only 28, nearly ten years younger. Thus, this survey population does not represent a random sample of the general US population with respect to age. From inspection of the gender breakdown of this population, males are heavilly over represented. According to the US Census Bureau, the general US population is only 49.2% male-- in this survey, respondents were over 57% male. Due to an over representation of men, this population is not a random sample of the US population.[2] Furthermore, this sample skews to lower-income people. According to the US Census Bureau, more than 10% of American Households had incomes above 157,500-- less than 3% of sample data came from households with income above 150,000.[3] Thus, the data set is not a random sample of American Households and skews towards households with less income.
+
+According to CloudResearch, 57.5% of participants in MTURK are female, in our dataset 57% of survey responses came from men. Clearly, our data set is not a random sample of the Amazom MTURK population. [5] Income wise, this data set appears to be close to a random sample of the MTRUK data set income wise, with the largest discrepancy coming in the 150k+ income bucket, MTRURK is about 5%, this data is around 3%. Overall, income appears to be the same across MTRUK and the sample. The age distribution appears to match the Amazon MTURK population closer than the overall US population, with the majority of respondents under 40. The median age of MTURK as a whole is a bit higher than 28, our median, according to a graph on CloudResearch [5]. Overall, the sample appears to be a bit younger and more male than MTRUK as a whole.
+
+
+
+Sources: 
+1. https://www.census.gov/data/developers/data-sets/acs-5year.html
+2. https://www.census.gov/prod/cen2010/briefs/c2010br-03.pdf
+3. https://www.census.gov/library/visualizations/2015/demo/distribution-of-household-income--2014.html
+5. https://www.cloudresearch.com/resources/blog/who-uses-amazon-mturk-2020-demographics/
 
 ## Final estimate
 
@@ -151,6 +276,49 @@ To be specific, you should include:
 4. Limitations of the study. 
 
 
+```{r reachmodel, echo=TRUE, message=FALSE, warning=FALSE}
+numhouseholds <- 123.23 #statistia 2014 
+
+# https://www.statista.com/statistics/183635/number-of-households-in-the-us/
+
+avghhsize <- 2.54
+
+# https://www.statista.com/statistics/183648/average-size-of-households-in-the-us/
+
+incomeratedf <- incomeratedf %>% mutate(hhcount = c(15657, 
+20007,
+22579,
+21227,
+31034,
+14081
+))
+# https://en.wikipedia.org/wiki/Household_income_in_the_United_States#Distribution_of_household_income_in_2014_according_to_US_Census_data
+
+incomeratedf <- incomeratedf %>% mutate(siriushhs = siriuspct*hhcount)
+
+```
+
+## (2.3) Final estimate Response
+1. The Goal of this study is to estimate the Wharton audience size in the United States by using the sample data from the MTURK population. This study operates under two critical limiting assumptions- the sample is a random sample of the MTURK population, and that the proportion of Wharton listeners vs. Sirius listeners in the general population is the same as that in the MTURK population.Thus, the goal of this study is to estimate the audience size of Sirius XM in the United States using the MTURK data, and apply the same proportion of wharton listeners of SiriusXM listeners as MTURK. 
+
+2. The method this study uses to estimate the audience size of the Wharton station, through estimating Sirius XM's audience size, will use different penetration rates across household income buckets. SiriusXM penetration varied along both age and income ranges, but due to limited samples from older age ranges (less than 100 sample points for people over 50 years old), income-varying penetration rates were selected for estimating SiriusXM's reach. Having far more data points for different income buckets representing the vast majority of the US Population (only around 10% of the population was in households with income greater than 150k). Using data from the US Census Bureau, the number of households in each income bracket can be found. Using this methodology, a total number of SiriusXM listening households is found. Combining this with the average household size in 2014 and the penetration of Wharton compared to SiriusXM found in the MTRURK data, a total audience estimation for the Wharton channel is estimated.
+
+
+3. From this data set and the above explained methodology, the Wharton channel's audiance is estimated to be 12.3 million people, or around 3.8% of the 2014 US Population.
+
+```{r q1finalresults, echo=TRUE, message=FALSE, warning=FALSE}
+whartonaudiance <- sum(incomeratedf$siriushhs) * avghhsize * 1000 * whartonpctofsirius
+whartonaudiance
+
+estpct <- whartonaudiance / (318400*1000)
+estpct
+```
+
+
+4. The greatest limitation to this study is the "income wharton listeining propensity homogeneity" introduced by the limiting assumption in the problem. When we remove this limiting assumption, the audiance size increases by around 50% because wealthier households have a higher propensity to listen to the Wharton channel. Further limitations include a constant household size across income brackets and not considering the impact of age.
+
+
+
 ## New task
 
 Now suppose you are asked to design a study to estimate the audience size of Wharton Business Radio Show as of today: You are given a budget of $1000. You need to present your findings in two months. 
@@ -162,6 +330,15 @@ Write a proposal for this study which includes:
 Please fill in the google form to list your platform where surveys will be launched and collected [HERE](https://forms.gle/8SmjFQ1tpqr6c4sa8) 
 
 A good proposal will give an accurate estimation with the least amount of money used. 
+
+
+1. Google Display Network ads paid per-click on general population websites (news) or a balanced approach to gender segments (sports, cooking recipe sites) and second order organic referrals to the form.
+
+2. To estimate the Wharton audience size, we must reach SiriusXM listeners. Doing this direct, though ads on SiriusXM stations is prohibitively expensive-- SiriusXM requires a minimum monthly spend of 10,000. [1](https://howtoadvertiseonsiriusxm.com/how-much-does-it-cost-to-advertise-on-sirius-xm/) Alternatively, and cheaper, we could run ads drawing only SiriusXM listeners through Google Banner Ads. Running an ad asking website viewers to "vote on new SiriusXM Channels," paying on a cost-per-click basis, would ensure most people who click the ad listen to SiriusXM. On top of paid inbound traffic, the top of the linked form would include an easy to share feature so all users, especially mobile users, could forward the link to their friends that listen to SiriusXM. This would create a second, free, organic traffic source. People would be motivated to share the survey under the belief that this directly influences future SiriusXM channels. In the survey, we would first ask for the desired information, and sneak in "do you listen to the Wharton channel" in the middle. The cost-per-click on the google display network is under 1 dollar for most industries, so we would likely generate around 1000 clicks to the survey. From there a portion would fill it out, and a smaller portion would share with friends. With enough organic referrals, under the guise that respondents are impacting future channel lineups, the survey would likely generate over 1000 data points of people interested in changing SiriusXM's lineup, a population likely resembling the underlying SiriusXM listening base.
+
+Perhaps the largest challenge in estimating Wharton's reach is collecting enough data points for the upper income buckets since these were observed to be more likely to listen to the channel. By promising a non-monetary benefit that they would value, like influencing new channels, this could possibly reach these wealthier demographics. Organic referrals within these demographics would strengthen this method's reach of richer individuals.
+
+CPC for Google Ads: https://www.webfx.com/blog/marketing/much-cost-advertise-google-adwords/ 
 
 
 
@@ -503,20 +680,63 @@ i. To describe the increment of payroll in each year there are several possible 
 
     - option 1: diff: payroll_2013 - payroll_2012
     - option 2: log diff: log(payroll_2013) - log(payroll_2012)
-
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+baseball<-read.csv("data/MLPayData_Total.csv")
+names(baseball)
+```
 Explain why the log difference is more appropriate in this setup.
 
+The logarithmic is helpful when the data covers an extensive range of values. Using the logarithms of the values rather than the actual values reduces a wide range to a more manageable size. In the case of this dataset, most baseball teams’ total payroll more than quadrupled for 16 years. Without doing the logarithmic transformation, the increases in payroll would seem much more significant in the later years than the beginning years, potentially skewing the results of our regression and PCA analysis results. Therefore, taking the log difference is way more appropriate in this setup.
+
 ii. Create a new variable `diff_log=log(payroll_2013) - log(payroll_2012)`. Hint: use `dplyr::lag()` function.
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+diff_log = log(baseball[3:18]) - log(baseball[2:17])
+combined <- cbind(baseball,diff_log)
+dim(combined)
+filtered1 = cbind(combined[1],combined[36:52])
+filtered2 = cbind(combined[1],combined[53:68])
+filtered3 = cbind(combined[1],combined[2:18])
+```
 
 iii. Create a long data table including: team, year, diff_log, win_pct
-
-
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+long_filtered1 = filtered1 %>% pivot_longer(!Team.name.2014, names_to =  "year", 
+                                            names_prefix = "X", values_to = "win_pct")
+long_filtered2 = filtered2 %>% pivot_longer(!Team.name.2014, names_to =  "year", 
+                                            names_prefix = "p", values_to = "diff_log")
+olClean <- function(x){
+    x <- str_remove(x,".pct")
+}
+long_filtered3 = filtered3 %>% pivot_longer(!Team.name.2014, names_to =  "year", 
+                                            names_prefix = "p", values_to = "total_pay")
+long_filtered1["year"] = sapply(long_filtered1["year"],olClean)
+Final_df = full_join(long_filtered1,long_filtered2,by = c("Team.name.2014","year"))
+Final_df = full_join(Final_df,long_filtered3,by = c("Team.name.2014","year"))
+names(Final_df)[names(Final_df) == 'Team.name.2014'] <- 'Team'
+head(Final_df)
+summary(Final_df)
+```
 ## Exploratory questions
 
 i. Which five teams had highest increase in their payroll between years 2010 and 2014, inclusive?
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+explore1 <- combined[,c("Team.name.2014","X2010","X2014")]
+explore1["payroll"] = explore1["X2010"] - explore1["X2014"]
+library(dplyr)
+arrange(explore1,payroll)
+```
+
+Pirates, Orioles, Nationals, Mariners, Royals.
 
 ii. Between 2010 and 2014, inclusive, which team(s) "improved" the most? That is, had the biggest percentage gain in wins?
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+explore2 <- combined[,c("Team.name.2014","X2010.pct","X2014.pct")]
+explore2["win"] = combined["X2010.pct"] - combined["X2014.pct"]
+library(dplyr)
+arrange(explore2,win)
+```
 
+Pirates, Orioles, Nationals, Mariners, Royals etc. improved the most with the highest percentage gain in wins.
 
 ## Do log increases in payroll imply better performance? 
 
@@ -524,12 +744,46 @@ Is there evidence to support the hypothesis that higher increases in payroll on 
 
 Pick up a few statistics, accompanied with some data visualization, to support your answer. 
 
+**From the graph below, we see that there is evidence to support the hypothesis that higher increase in payroll on the log scale leads to higher performance. This is supported by a positive coefficient with a t-value of 3.7 that is statistically significant. **
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+Final_df %>% ggplot() + aes(x = diff_log, y = win_pct) + geom_point() + 
+  geom_smooth(method='lm', formula= y~x)
+#Final_df %>% ggplot() + aes(x = diff_log, y = win_pct) + geom_point()
+#ggplot(data = Final_df, x = "diff_log", y = "win_pct")
+simple.fit = lm(win_pct ~ diff_log, data = Final_df)
+summary(simple.fit)
+```
 ## Comparison
 
 Which set of factors are better explaining performance? Yearly payroll or yearly increase in payroll? What criterion is being used? 
 
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+
+Final_df %>%
+  ggplot(aes(x=total_pay, y=win_pct, group = year, color=Team)) +
+  geom_point()+
+  geom_smooth(method="lm", formula=y~x, se=F,color = "red")+
+  facet_wrap(~year) + 
+  theme_bw() +
+  theme(legend.position = 0)
 
 
+Final_df %>%
+  ggplot(aes(x=diff_log, y=win_pct, group = year, color=Team)) +
+  geom_point()+
+  geom_smooth(method="lm", formula=y~x, se=F,color = "red")+
+  facet_wrap(~year) + 
+  theme_bw() +
+  theme(legend.position = 0)
+```
 
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+simple.fit = lm(win_pct ~ diff_log, data = Final_df)
+summary(simple.fit)
 
+simple.fit = lm(win_pct ~ total_pay, data = Final_df)
+summary(simple.fit)
+```
 
+Based on the line graphs, there is strong evidenece that yearly pay roll is better at explaining performance, based on the positive correlations throughout the years. This conclusion is supported by the fact the R^2 is higher for total pay than diff log. Furthermore, the t-value of 8.3 and p-value for total_pay is more statistically significant. Meanwhile, there are some years where the regression fit for diff_log and win_pct are negative, for example, 2014.
