@@ -60,6 +60,12 @@ For supervised learning, we try to find out how does a set of predictors relate 
 - Study Module 3: Clustering Analysis
 - Study Module 4: Multiple regression
 
+## Data needed
+
+- `NLSY79.csv`
+- `brca_subtype.csv`
+- `brca_x_patient.csv`
+
 # Case study 1: Self-seteem 
 
 Self-esteem generally describes a person's overall sense of self-worthiness and personal value. It can play significant role in one's motivation and success throughout the life. Factors that influence self-esteem can be inner thinking, health condition, age, life experiences etc. We will try to identify possible factors in our data that are related to the level of self-esteem. 
@@ -170,11 +176,11 @@ Let concentrate on Esteem scores evaluated in 87.
 
       - Personal information: gender, education (05, problematic), log(income) in 87, job type in 87, Body mass index as a measure of health (The BMI is defined as the body mass divided by the square of the body height, and is universally expressed in units of kg/m²). Since BMI is measured in 05, this will not be a good practice to be inclueded as possible variables. 
           
-      - Household environment: Imagazine, Inewspaper, Ilibrary, MotherEd, FatherEd, FamilyIncome78. Do set indicators `Imagazine` and `Ilibrary` as factors
+      - Household environment: Imagazine, Inewspaper, Ilibrary, MotherEd, FatherEd, FamilyIncome78. Do set indicators `Imagazine`, `Inewspaper` and `Ilibrary` as factors. 
     
       - Use PC1 of SVABS as level of intelligence
         
-    b)   Run a few regression models between PC1 of all the esteem scores and factors listed in a). Find a final best model with your own criterion. 
+    b)   Run a few regression models between PC1 of all the esteem scores and suitable variables listed in a). Find a final best model with your own criterion. 
 
       - How did you land this model? Run a model diagnosis to see if the linear model assumptions are reasonably met. 
         
@@ -208,7 +214,7 @@ brca <- brca[,-1]
 
 1. Summary and transformation
 
-    a) How many patients we have in each sub-type? 
+    a) How many patients are there in each sub-type? 
 
     b) Randomly pick 5 genes and plot the histogram by each sub-type.
 
@@ -283,7 +289,7 @@ b) Summarize the effects found.
 c) Predict the `mpg` of the following car: A red car built in the US in 1983 that is 180 inches long, has eight cylinders, displaces 350 cu. inches, weighs 4000 pounds, and has a horsepower of 260. Also give a 95% CI for your prediction.
 
 
-# Simple Regression through simulations
+# Simple Regression through simulations (option)
     
 ## Linear model through simulations
 
@@ -303,9 +309,6 @@ x <- seq(0, 1, length = 40)
 
 Create a corresponding output vector for $\mathbf{y}$ according to the equation given above. Use `set.seed(1)`. Then, create a scatterplot with $(x_i, y_i)$ pairs. Base R plotting is acceptable, but if you can, please attempt to use `ggplot2` to create the plot. Make sure to have clear labels and sensible titles on your plots.
 
-```{r}
-# TODO
-```
 
 ### Understand the model
 i. Find the LS estimates of $\boldsymbol{\beta}_0$ and $\boldsymbol{\beta}_1$, using the `lm()` function. What are the true values of $\boldsymbol{\beta}_0$ and $\boldsymbol{\beta}_1$? Do the estimates look to be good? 
@@ -316,9 +319,6 @@ ii. What is the 95% confidence interval for $\boldsymbol{\beta}_1$? Does this co
 
 iii. Overlay the LS estimates and the true lines of the mean function onto a copy of the scatterplot you made above.
 
-```{r}
-# TODO
-```
 
 ### diagnoses
 
@@ -328,10 +328,6 @@ ii. Provide a normal QQ plot of the residuals.
 
 iii. Comment on how well the model assumptions are met for the sample you used. 
 
-
-```{r}
-# TODO
-```
 
 
 ## Understand sampling distribution and confidence intervals

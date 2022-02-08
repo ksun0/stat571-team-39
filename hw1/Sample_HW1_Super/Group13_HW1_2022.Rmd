@@ -1,0 +1,1041 @@
+---
+title: " Modern Data Mining, HW 1"
+author:
+- Muhua Chen
+- Yanqi Liu
+- Tianxiao Zhang
+date: 'Due: 11:59PM,  Jan. 30th, 2021'
+output:
+  html_document:
+    code_folding: show
+    highlight: haddock
+    number_sections: yes
+    theme: lumen
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: '4'
+  word_document:
+    toc: yes
+    toc_depth: '4'
+urlcolor: blue
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, results = "hide", fig.width=12, fig.height=8)
+options(scipen = 0, digits = 3)  # controls base R output
+# check if you have ISLR package, if not, install it
+if(!require('pacman')) {install.packages('pacman')}
+pacman::p_load(ISLR, readxl, tidyverse, magrittr, dplyr, ggplot2, skimr, htmlTable, sjPlot)
+```
+# Case study 1: Audience Size
+
+## Data preparation
+
+i. We need to clean and select only the variables of interest. 
+
+Select only the variables Age, Gender, Education Level, Household Income in 2013, Sirius Listener?, Wharton Listener? and Time used to finish the survey.
+
+Change the variable names to be "age", "gender", "education", "income", "sirius", "wharton", "worktime".
+
+```{r}
+# library(dplyr)
+# library(readr)
+# library(tidyverse)
+survey <- read.csv("/Users/liuyanqi/Desktop/STAT571/hw1/data/Survey_results_final.csv", header=T, stringsAsFactors=FALSE)
+
+survey_updated <- survey[,c('Answer.Age','Answer.Gender','Answer.Education',
+                      'Answer.HouseHoldIncome','Answer.Sirius.Radio','Answer.Wharton.Radio',
+                      'WorkTimeInSeconds')]
+
+survey_updated <- survey_updated %>% 
+  rename(age = Answer.Age, gender = Answer.Gender, education = Answer.Education, 
+         income = Answer.HouseHoldIncome, sirius = Answer.Sirius.Radio, 
+         wharton = Answer.Wharton.Radio, worktime = WorkTimeInSeconds)
+```
+
+ii. Handle missing/wrongly filled values of the selected variables
+
+As in real world data with user input, the data is incomplete, with missing values, and has incorrect responses. There is no general rule for dealing with these problems beyond “use common sense.” In whatever case, explain what the problems were and how you addressed them. Be sure to explain your rationale for your chosen methods of handling issues with the data. Do not use Excel for this, however tempting it might be.
+
+Tip: Reflect on the reasons for which data could be wrong or missing. How would you address each case? For this homework, if you are trying to predict missing values with regression, you are definitely overthinking. Keep it simple.
+
+
+```{r}
+sum(is.na(survey_updated))
+
+# Check the unique values for each variable to find out the missing ones and wrongly filled values
+list_unique <- lapply(survey_updated, unique)
+list_unique
+```
+**
+The count of NA values is 0, but that does not necessarily mean there is no missing value. It just means that there is no specific "NA" value in the data. From the list of unique values for each variable we can see that the missing values are represented by "". These values will be removed.
+**
+
+**
+There are also some obviously wrong/inaccurate entries, like "female", "4", "223", and "Eighteen(18)" in age, and "select one" in education. Wrong entries (like "female" and "4" in age and "select one" in education) will be removed (become missing values), because we cannot deduce the valid entries from them. For "the "223", "Eighteen(18)" in age, we can easily tell what the valid entry would be, so we can just impute 18 for "Eighteen(18)" and 23 for "223".
+We also changed all categorical variables to be factors, but age and worktime are supposed to be numeric variables, so we changed age and worktime to be numeric.
+**
+```{r}
+# Update the "Eighteen(18)" value in age
+survey_updated["age"][survey_updated["age"] == "Eighteen (18)"] <- 18
+
+# Update the "27`" value in age
+survey_updated["age"][survey_updated["age"] == "27`"] <- 27
+
+# Update the "223" value in age
+survey_updated["age"][survey_updated["age"] == "223"] <- 23
+
+# Update the "female" value in age
+survey_updated["age"][survey_updated["age"] == "female"] <- ""
+
+# Update the "4" value in age
+survey_updated["age"][survey_updated["age"] == "4"] <- ""
+
+# Update the "select one" value in education
+survey_updated["education"][survey_updated["education"] == "select one"] <- ""
+
+# Change "" in all columns to be NA (null value)
+survey_updated[survey_updated == ""] <- NA
+
+# list_unique <- lapply(survey_updated, unique)
+# list_unique
+
+# Change data types
+survey_updated$age <- as.numeric(survey_updated$age)
+survey_updated$worktime <- as.numeric(survey_updated$worktime)
+
+survey_updated$gender <- as.factor(survey_updated$gender)
+survey_updated$income <- as.factor(survey_updated$income)
+survey_updated$education <- as.factor(survey_updated$education)
+survey_updated$sirius <- as.factor(survey_updated$sirius)
+survey_updated$wharton <- as.factor(survey_updated$wharton)
+
+# summary(survey_updated)
+```
+**
+After processing, we solved all wrong-entry cases, and the only thing left to be dealt with is missing values.
+**
+```{r}
+# sum(is.na(survey_updated))
+colSums(is.na(survey_updated))
+
+missing <- survey_updated[rowSums(is.na(survey_updated)) > 0, ]  
+missing3 <- survey_updated[rowSums(is.na(survey_updated)) >= 3, ] 
+```
+**
+Most of the missing data come from education. 
+There are 35 rows that contain at least 1 missing entry, and there are 2 rows that contain at least 3 missing entries.
+**
+
+```{r}
+survey_cleaned <- na.omit(survey_updated)
+
+# Compare the distribution of data tables with and without missing values
+summary(survey_cleaned)
+summary(survey_updated)
+
+# skim(survey_cleaned)
+# skim(survey_updated)
+```
+**
+Missing and wrong data is a common issue in real-world data analysis projects. There are many potential reasons for it. For missing data, sometimes people just forget to put in values in some fields when they are not required to do so, and sometimes they are reluctant to share sensitive personal information. For wrong data, sometimes people just have typos or misunderstand the questions. When we encounter wrong data, we use our best judgment to determine what was the actual value the person wants to put in, and if that is not possible, we just treat it as missing. 
+**
+
+**
+There are 1764 rows of data in total, and 35 rows contain missing values. From a statistical standpoint, when the missing data proportion is low, we can just remove them, and that would not affect data distribution in most cases. However, each row contains 7 variables, and if we remove the entire row just because 1 out of the 7 variables is missing, we are giving up some potentially meaningful information. Thus, we keep two different versions of the data table, one (survey_updated) contains all data and the other (survey_cleaned) only contains rows without any missing data, to compare the data distribution (analyze whether the missing data is significant to be kept). From the output of summary stats of the two tables we can see that the distribution is not changed by missing values, so we will use the data table without missing values in our analysis for the demographic distribution.
+**
+
+<br>
+iii. Brief summary 
+
+Write a brief report to summarize all the variables collected. Include both summary statistics (including sample size) and graphical displays such as histograms or bar charts where appropriate. Comment on what you have found from this sample. (For example - it's very interesting to think about why would one work for a job that pays only 10cents/each survey? Who are those survey workers? The answer may be interesting even if it may not directly relate to our goal.)
+
+```{r}
+summary(survey_cleaned)
+
+# Use basic histograms to analyze the distribution of numeric variables, age and worktime
+hist(survey_cleaned$age, labels = TRUE, main="Age Distribution", xlab="Age Level", ylab="Number of People", ylim=c(0, 550))
+hist(survey_cleaned$worktime, labels = TRUE, main="Worktime Distribution", xlab="Worktime Level", ylab="Number of People", ylim=c(0, 860))
+
+# Use basic barplots to analyze the distribution of binary categorical variables, gender, sirius, and wharton
+byGender<-barplot(table(survey_cleaned$gender), main="Gender Distribution", xlab="Gender", ylab="Number of People")
+text(byGender, 0, table(survey_cleaned$gender),cex=1,pos=3)
+
+bySirius<-barplot(table(survey_cleaned$sirius), main="Sirius Distribution", xlab="Sirius", ylab="Number of People")
+text(bySirius, 0, table(survey_cleaned$sirius),cex=1,pos=3)
+
+byWharton<-barplot(table(survey_cleaned$wharton), main="Wharton Distribution", xlab="Wharton", ylab="Number of People")
+text(byWharton, 0, table(survey_cleaned$wharton),cex=1,pos=3)
+
+# Use advanced barplots in ggplot to analyze the distribution of categorical variables, education and income
+# since these two variables have more categories than the previous ones, ggplot is used to be able to show all x values
+ggplot(survey_cleaned, aes(x=education)) +
+  geom_bar()+
+  theme(axis.text.x = element_text(size = 7.5, angle = 50, hjust = 1))+
+  ggtitle("Distribution of Education Level")+
+  xlab("Education Level")+
+  ylab("Number of people")
+
+ggplot(survey_cleaned, aes(x=income)) +
+  geom_bar()+
+  theme(axis.text.x = element_text(size = 10, angle = 30, hjust = 1))+
+  ggtitle("Distribution of Income Level")+
+  xlab("Income Level")+
+  ylab("Number of people")
+
+# Complicated Visualizations
+ggplot(survey_cleaned, aes(x = gender, fill = sirius)) +
+    geom_bar(position = position_dodge()) +
+    theme_classic()
+
+ggplot(survey_cleaned, aes(x = gender, fill = wharton)) +
+    geom_bar(position = position_dodge()) +
+    theme_classic()
+```
+**
+Most of the survey respondents are between 15 and 40 years old, and the age distribution is skewed right, meaning that the respondent population is relatively young. 
+**
+
+**
+Female accounts for 42.2% of the respondents, and male accounts for 57.8%, significantly higher than female. 
+**
+
+**
+About 77.4% of the respondents have listened to Sirius, while only 4.0% of them have listened to the Wharton program. 
+**
+
+**
+Majority of the respondents have some college education or the entire bachelor’s education, meaning that they are relatively well educated. 
+**
+
+**
+In terms of income distribution, it is relatively balanced, but that is also due to the fact that 75,000 to 150,000 is put into one category. Most of the respondents fall into the income group between 15,000 and 75,000. It is also interesting to find out that some high income people (>75,000 USD) are still interested in earning the 0.1 dollar compensation. 
+**
+
+**
+Most respondents can finish the survey in 10 to 30 seconds, because the survey is short and easy to answer. This can also partially explain why people are willing to take the survey for 10 cents， because the time commitment needed is minimum. 
+**
+
+**
+Most females have not listened to the Wharton program although they have listened to Sirius, and that situation is slightly better for males (most Wharton listeners are males).
+**
+
+
+
+
+## Sample properties
+
+The population from which the sample is drawn determines where the results of our analysis can be applied or generalized. We include some basic demographic information for the purpose of identifying sample bias, if any exists. Combine our data and the general population distribution in age, gender and income to try to characterize our sample on hand.
+
+i. Does this sample appear to be a random sample from the general population of the USA?
+ii. Does this sample appear to be a random sample from the MTURK population?
+
+Note: You can not provide evidence by simply looking at our data here. For example, you need to find distribution of education in our age group in US to see if the two groups match in distribution. You may need to gather some background information about the MTURK population to have a slight sense if this particular sample seem to a random sample from there... Please do not spend too much time gathering evidence. 
+
+```{r}
+# Age distribution Comparison
+hist(survey_cleaned$age, labels = TRUE, main="Age Distribution", xlab="Age Level", ylab="Number of People", ylim=c(0, 550))
+```
+**
+US Population Age
+**
+
+**
+15.1% between 18-29, 16.5% 30-39, 15.6% 40-49, 52.8% >50.
+**
+
+**
+Overall, the US age distribution is skewed left, meaning that mid-old people (more than 40 years old) accounts for a large proportion (68.4%) of the population and young people between 18-39 is not as much (31.6%).
+**
+
+**
+Link to external source: https://www.statista.com/statistics/241488/population-of-the-us-by-sex-and-age/
+**
+<br /><br />
+
+**
+MTURK Population Age
+**
+
+**
+29.7% between 18-29, 36.8% 30-39, 16.8% 40-49, 16.7% >50. 
+**
+
+**
+The age distribution for MTURK is skewed right, meaning that most MTURK users are relatively young (more than 65% between 18-39). Only 33.5% of MTURK users are above 40 years old.
+**
+
+**
+Link to external source: https://www.cloudresearch.com/resources/blog/who-uses-amazon-mturk-2020-demographics/
+**
+<br /><br />
+
+**
+In our data, the age distribution is also skewed right, representing a young population. More than 75% of respondents are 20 to 40 years old, and that is similar to the age distribution of the general MTURK users, but much different from the general US population.
+**
+
+```{r}
+# Gender Distribution Comparison
+byGender<-barplot(table(survey_cleaned$gender), main="Gender Distribution", xlab="Gender", ylab="Number of People")
+text(byGender, 0, table(survey_cleaned$gender),cex=1,pos=3)
+```
+**
+US Population Gender
+**
+
+**
+In 2020, male (162.26M) accounts for 49.25% of the US population, and female (167.23M) accounts for 50.75%. The distribution is balanced, and the female ratio is slightly larger.
+**
+
+**
+Link to external source: https://www.statista.com/statistics/241495/us-population-by-sex/
+**
+<br /><br />
+**
+MTURK Population Gender
+**
+
+**
+57% of people on MTURK are female; 43% are male. The female ratio is much larger than that of male.
+**
+
+**
+Link to external source: https://www.cloudresearch.com/resources/blog/who-uses-amazon-mturk-2020-demographics/
+**
+<br /><br />
+**
+In our data, female accounts for 42.2% of the respondents, and male accounts for 57.8%. The male ratio is much larger than that of female, which is greatly different from the US population and the MTURK population, so it does not seem like a random sample from either of them in terms of gender distribution.
+**
+
+```{r}
+# Income Distribution Comparison
+ggplot(survey_cleaned, aes(x=income)) +
+  geom_bar()+
+  theme(axis.text.x = element_text(size = 10, angle = 30, hjust = 1))+
+  ggtitle("Distribution of Income Level")+
+  xlab("Income Level")+
+  ylab("Number of people")
+```
+**
+US Population Income
+**
+
+**
+9.4% under 15,000 USD, 8.7% 15,000-25,000 USD, 19.7% 25,000-50,000 USD, 16.5% 50,000-75,000 USD, 27.5% 75,000-150,000 USD, 18.3% more than 150,000 USD. The distribution is relatively even among these income categories, and high income (75,000-150,000) households accounts for a considerable amount.
+**
+
+**
+Link to external source: https://www.statista.com/statistics/203183/percentage-distribution-of-household-income-in-the-us/
+**
+<br /><br />
+**
+MTURK Population Income
+**
+
+**
+6.31% under 10,000 USD, 18.27% 10,000-30,000 USD, 21.84% 30,000-50,000 USD, 26.46% 50,000-80,000 USD, 22.19% 80,000-150,000 USD, 4.92% more than 150,000 USD. The distribution is even among these income categories as well, and we do not see an especially high proportion for the high income (80,000-150,000) households.
+**
+
+**
+Link to external source: https://www.cloudresearch.com/resources/blog/who-uses-amazon-mturk-2020-demographics/
+**
+<br /><br />
+**
+In our data, most people are not wealthy and high income households (more than 75,000 USD) accounts for a much smaller proportion (21.4%) than the US general population (45.8%), and that partially explains why these people need to earn money by filling out surveys. The gap is much smaller than the difference between our sample data and the MTURK population (21.4% vs. 27.11%), but it is still obvious. 
+**
+
+**
+Overall, our data does not seem to be a random sample from the US general population at all, because the age and income distribution differences are huge. Compared to the US general population, our data is more similar to the MTURK user population , especially in terms of age, but the significant difference in gender distribution prevents us from asserting that this is an unbiased random sample from the MTURK user database.
+**
+
+## Final estimate
+
+Give a final estimate of the Wharton audience size in January 2014. Assume that the sample is a random sample of the MTURK population, and that the proportion of Wharton listeners vs. Sirius listeners in the general population is the same as that in the MTURK population. Write a brief executive summary to summarize your findings and how you came to that conclusion.
+
+To be specific, you should include:
+
+1. Goal of the study
+2. Method used: data gathering, estimation methods
+3. Findings
+4. Limitations of the study. 
+
+```{r}
+# Number of Sirius Listeners
+sirius_size <- nrow(survey_updated[survey_updated$sirius == "Yes",])
+print("Sirius Listeners")
+sirius_size
+
+# Number of Wharton Listeners
+## Wharton only (is it possible to be Wharton listener without being a Sirius listener?)
+# nrow(survey_updated[survey_updated$wharton == "Yes",])
+
+## Wharton & Sirius
+wharton_size <- nrow(survey_updated[survey_updated$wharton == "Yes" & survey_updated$sirius == "Yes",])
+print("Wharton Listeners Among Sirius Listeners")
+wharton_size
+
+proportion <- wharton_size/sirius_size
+print("Wharton Listeners Proportion")
+proportion
+
+final_estimate <- proportion * 51.6
+print("Final Estimate of Wharton Listeners, in Million")
+final_estimate
+```
+**
+Executive Summary:
+**
+<br /><br />
+**
+Goal of Study:
+**
+
+**
+The goal of the study is to estimate the audience size for the talk show called Business Radio Powered by the Wharton School.
+**
+<br /><br />
+**
+Method and Assumption:
+**
+
+**
+Since the Wharton Talk show is a program in Sirius Radio, and we do have data about the audience size for SiriusXM, we are going to use the proportion of Sirius listeners who are also Wharton listeners to make the estimation.
+To gather potential user data, we designed and launched a survey via Amazon Mechanical Turk (MTURK) platform, and the sample size for the data we collected is around 1,800. In the survey, we collected user information about whether they have listened to SiriusXM and whether they have listened to the Wharton Talk Show. From these numbers, we could calculate the proportion of Sirius listeners who are also Wharton listeners, and then we could multiply the proportion by the total Sirius audience size to get an estimation of the Wharton audience size.
+Our assumption is that our MTURK survey sample is representative of the general SiriusXM population, and the proportion of Wharton listeners vs. Sirius listeners in the general population is the same as that in the MTURK population.
+**
+<br /><br />
+**
+Formula: #Wharton Audience = #total Sirius Audience * (#sample Wharton Audience / #sample Sirius Audience)
+**
+<br /><br />
+**
+Findings and Estimate:
+**
+
+**
+In our analysis, we noticed 2 survey respondents indicated themselves as Wharton listeners but not Sirius listeners. That is counter-intuitive, because the Wharton program is a part of Sirius, so Wharton listeners have to be Sirius listeners. It is possible that they are actually listeners for both Wharton and Sirius, and it is also possible that they are not listeners for neither, so we excluded these 2 data points in our analysis to avoid ambiguity.
+**
+<br /><br />
+**
+Key statistics for our calculations are shown below:
+**
+
+**
+Sample Sirius Audience # = 1,365
+**
+
+**
+Sample Wharton (also Sirius) Audience # = 72
+**
+
+**
+Proportion of Sirius Audience who are also Wharton Audience = 72/1,365 = 0.0527 = 5.27%
+**
+
+**
+Estimate of Wharton Listeners in total (in Million) = Total Sirius Audience # * Proportion = 51.6 * 5.27% = 2.72 M
+**
+<br /><br />
+**
+Limitations of the Study:
+**
+
+**
+The MTURK sample may not be representative of the actual Sirius and Wharton listener population. Most MTURK users are relatively young and fall into low income groups because of the nature of the program, while most potential Wharton program listeners tend to be more mature and successful in their careers (meaning they should be in high income groups), so the demographic characteristics for the survey sample do not match the listener group we are actually interested in. Thus, the proportion estimate can be misleading and inaccurate.
+**
+
+**
+The MTURK sample only includes US respondents. SiriusXM is a successful platform and Wharton is a world renowned business school, so it is reasonable to assume that there are some global listeners outside of the US territory. However, since only people in the US could answer the survey, it means that the proportion we calculated from the sample can hardly be used to estimate the audience size overseas, because the real actual proportion for them can be significantly different from the one in the US.
+**
+
+**
+The survey period is short and we cannot guarantee the truthfulness of the answers. The entire survey was run for only 6 days, most observations were collected in the first 2 days, and the final sample size is below 2,000. In such a short survey period with such a limited sample size, we could not guarantee the comprehensiveness and diversity of our respondents, and we cannot rule out potential seasonal effects, so the results can be biased. In addition, most people in MTURK are filling out surveys just for profit, and there is no cost for them to provide fake answers, so there is no guarantee on the quality and authenticity of the answers either. Thus, the information collected may not be accurate.
+**
+
+
+
+## New task
+
+Now suppose you are asked to design a study to estimate the audience size of Wharton Business Radio Show as of today: You are given a budget of $1000. You need to present your findings in two months. 
+
+Write a proposal for this study which includes:
+
+1. Method proposed to estimate the audience size.
+2. What data should be collected and where it should be sourced from.
+Please fill in the google form to list your platform where surveys will be launched and collected [HERE](https://forms.gle/8SmjFQ1tpqr6c4sa8) 
+
+A good proposal will give an accurate estimation with the least amount of money used. 
+
+**
+Goal of Study: 
+Estimate the audience size for the Wharton Talk Show
+**
+<br /><br />
+**
+Survey Platforms: MTURK
+**
+
+**
+Survey Period: Jan 2021 - Feb 2021 (30 days)
+**
+
+**
+Target Sample Size: 3,000 (750 sample for every week)
+**
+
+**
+Rewards: 0.15 USD for each survey on MTURK
+**
+
+**
+Budget: 450 USD (0.15 * 3000)
+**
+<br /><br />
+**
+For the first part of the study, we want to use the previous method mentioned in above sections as a starting point and improve it. We will use MTURK to collect the data but with modifications.
+**
+
+**
+The first modification we would make is to increase the survey period to one month, and we would limit the number of survey responses to 750 per week. That means we will disable the survey after we have collected 750 responses for that week, and then we will restart the survey the following Monday. By this method, we are essentially forcing the number of samples collected during the entire survey period to be evenly distributed for every week, and that can help us avoid potential seasonal effects to some extent. Considering that the total user population for MTURK is more than 250K, we think getting 3,000 responses in a month is reasonable. We will not require respondents to be in the US, but each user will only be allowed to fill out the survey once.
+**
+
+**
+The other modification is for the survey questions and money rewards. In addition to the 7 basic questions we included in the existing survey, we will add two more questions. If the respondents indicated themselves as Sirius or Wharton listeners, we would ask them the total number of times they have listened and the frequency at which they listened. The goal for these two additional questions is to help us rule out potential invalid and fake answers by identifying the inconsistencies (i.e. listeners with 0 listen frequency). Although it cannot solve the fake answer issue completely, it can help know more about the respondent and develop more insights. Since we are asking more questions, and the survey may take longer to complete, we are offering larger financial incentives (rewards increase from 0.1 to 0.15). Also, from our prior experience, a reward of 10 cents each survey did not get us to the desired sample size (1764 vs. 2000) we wanted, increasing the reward amount can give us a better chance to achieve the sample size of 3000.
+**
+<br /><br /><br /><br />
+**
+Survey Platforms: Social Media (Facebook + Twitter + LinkedIn)
+**
+
+**
+Survey Period: Jan 2021 - mid Feb 2021 (40 days)
+**
+
+**
+Target Sample Size: 2,000 (AVG 50 sample for every day)
+**
+
+**
+Rewards: Lottery for 5 USD gift card (for Starbucks, Amazon, News subscription etc.), 5.5% chance of winning (110 / 2,000 = 0.055)
+**
+
+**
+Budget: 550 USD (5 * 110)
+**
+<br /><br />
+**
+For the second part of the study, we are going to distribute the same survey we use on MTURK on other social media platforms.
+The survey period will be longer and the sample size we expect will be smaller, because social media users are different from MTURK users, and they are not treating filling surveys as a part-time job, so we would not expect them to be as reactive to the survey as MTURK users. We expect to collect 2,000 answers over 40 days, and that is 50 samples per day on average, and we believe that is a reasonable expectation.
+**
+
+**
+The specific social media we plan to use include Facebook, Twitter, and LinkedIn (not Instagram & Snapchat), and the commonality among them is that the general user population is relatively mature both age-wise and financially. According to our research, most Sirius listeners are relatively aged and wealthy, so the users for these social media platforms match the demographic features for the topic of interest (Sirius & Wharton program). From another perspective, most users for MTURK are young and not wealthy, so targeting these social media platforms will enable us to include more diversity in terms of survey respondent background. To avoid the same person filling out the survey multiple times on different platforms, we will insert a question at the front asking whether the person has completed the survey before (if yes, the survey will end).
+**
+
+**
+Since the target population are relatively aged and wealthy, 15 cents for each survey would not be enough incentive for them. Thus, we will provide 5 USD Amazon or Starbucks gift cards (basically a cup of free coffee), and each respondent will have a chance to participate in the lottery to win the gift cards. There will be 110 gift cards in total for 2000 respondents, so the selection chance is more than 5%.
+**
+
+**
+Link (Sirius Listener Demographics): https://www.bkgolfmedia.com/siriusxm-satellite-radio-and-demographics/
+**
+<br /><br />
+<br /><br />
+**
+Combining these two parts of the study, we can achieve a total sample size around 5,000, and we will use all the budget of 1,000 USD. 
+We can count the total number of Sirius listeners and Wharton listeners within the sample, and then calculate the proportion of Wharton listeners among Sirius listeners. Finally, we can multiply the proportion and the total Sirius audience to get the estimate.
+**
+<br /><br />
+**
+Formula: 
+Proportion = (#sample Wharton Audience MTURK + #sample Wharton Audience social media) / (#sample Sirius Audience MTURK + #sample SiriusAudience social media)
+**
+
+**
+Wharton Audience# = #total Sirius Audience * proportion
+**
+<br /><br />
+**
+Improvements and Limitations:
+**
+
+**
+The biggest improvement would be the comprehensiveness and diversity of respondents included in the survey. Since most Sirius listeners are aged and wealthy, they are the population we care the most, but most MTURK users are young and not wealthy, adding in respondents from the social media most used by middle-aged people can greatly improve the precision of our analysis.
+**
+
+**
+Financially, we are providing greater incentive to complete the surveys overall. Combined with additional detailed questions, we can expect to say an improvement in the quality of the answer. With the additional question, we can also potentially find more interesting insights (i.e. how loyal and sticky the listeners are), rather than just estimating the audience size.
+**
+
+**
+One main risk for doing multi-channel surveys is that the same person can submit answers multiple times in order to get the financial rewards, and it is hard to track submission on different platforms. Although we do ask whether the respondent has completed the survey upfront, the effectiveness depends on the individual integrity, and we cannot solve the issue completely.
+**
+
+**
+Another limitation is that we are not completely sure about the response rate on social media platforms. People on MTURK treat filling surveys as jobs, so the response rate can be high, but we cannot guarantee that on social media platforms, especially among people who are mature and wealthy. Maybe they will not even bother to click on the survey link on LinkedIn, or maybe after they click in, they are not attracted by the gift card reward and just exit. There is a chance that we cannot reach our target of 2,000 survey responses through social media, and our respondent diversity will still be bad and the proportion estimate will be inaccurate. 
+**
+
+
+
+\pagebreak
+
+# Case study 2: Women in Science
+
+
+Are women underrepresented in science in general? How does gender relate to the type of educational degree pursued? Does the number of higher degrees increase over the years? In an attempt to answer these questions, we assembled a data set (`WomenData_06_16.xlsx`) from [NSF](https://ncses.nsf.gov/pubs/nsf19304/digest/field-of-degree-women) about various degrees granted in the U.S. from 2006 to 2016. It contains the following variables: Field (Non-science-engineering (`Non-S&E`) and sciences (`Computer sciences`, `Mathematics and statistics`, etc.)), Degree (`BS`, `MS`, `PhD`), Sex (`M`, `F`), Number of degrees granted, and Year.
+
+Our goal is to answer the above questions only through EDA (Exploratory Data Analyses) without formal testing. We have provided sample R-codes in the appendix to help you if needed. 
+
+
+## Data preparation  
+
+1. Understand and clean the data
+
+Notice the data came in as an Excel file. We need to use the package `readxl` and the function `read_excel()` to read the data `WomenData_06_16.xlsx` into R. 
+
+
+i. Read the data into R.
+ii. Clean the names of each variables. (Change variable names to  `Field`,`Degree`, `Sex`, `Year` and `Number` )
+iii. Set the variable natures properly. 
+iv. Any missing values?
+
+```{r, echo = TRUE}
+
+wsci <- read_excel("/Users/liuyanqi/Desktop/STAT571/hw1/data/WomenData_06_16.xlsx")
+wsci %<>%
+  rename(Field = "Field and sex",
+         Number = "Degrees Awarded") %>%
+  mutate(Field = as.factor(Field),
+         Degree = as.factor(Degree),
+         Sex = as.factor(Sex))
+
+
+skim(wsci)
+# no missing values
+```
+
+**No missing values in this dataset. **
+
+2. Write a summary describing the data set provided here. 
+
+i. How many fields are there in this data?
+ii. What are the degree types? 
+iii. How many year's statistics are being reported here? 
+
+```{r, echo = TRUE}
+wsci %>%
+  summarise(num_fields = n_distinct(Field), num_years = n_distinct(Year))
+
+wsci %>%
+  select(Field) %>% 
+  distinct()
+```
+```{r, echo = TRUE}
+wsci %>%
+  select(Degree) %>% 
+  distinct()
+```
+
+**There are 10 different fields in this data. There are three degree types: BS, MS and PHD. 11 distincts years of statistics are reported in the dataset, from 2006 to 2016. This also means that there is data for every year in the dataset.**
+
+## BS degrees in 2015
+
+Is there evidence that more males are in science-related fields vs `Non-S&E`? Provide summary statistics and a plot which shows the number of people by gender and by field. Write a brief summary to describe your findings.
+
+```{r, echo = TRUE}
+wsci %>% 
+  filter(Year == 2015, Degree == "BS") %>%
+  mutate(SE = ifelse(Field!="Non-S&E" , "S&E", "Non-S&E")) %>%
+  group_by(SE, Sex) %>%
+  summarise(SE_number = sum(Number)) %>%
+  ggplot(aes(x = SE, y = SE_number, fill = Sex)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  theme(axis.text.y = element_text(angle = 30)) +
+  geom_text(aes(label = SE_number), position = position_dodge(width = 1), size = 3, vjust = -0.5) +
+  ggtitle("BS Degrees granted by S&E vs non-S&E by gender in 2015")
+
+wsci %>%
+  filter(Year == 2015, Degree == "BS") %>%
+  mutate(SE = ifelse(Field!="Non-S&E" , "S&E", "Non-S&E")) %>%
+  group_by(SE, Sex) %>%
+  summarise(SE_number = sum(Number)) %>%
+  ggplot(aes(x = SE, y = SE_number, fill = Sex)) +
+  labs(y="Proportion", x = "Field Category") + 
+  geom_bar(stat = "identity", position = "fill") +
+  ggtitle("BS Degrees proportion by sex granted by S&E vs non-S&E in 2015")
+```
+
+**Regarding the absolute values of number of males holding BS degrees in 2015, it is evident that there are more males in non-S&E (493304) fields than S&E (327122) as shown in the first graph. But comparing the numbers to the number of females in each field, the number of females is much greater than males in non-S&E fields and slightly lower in S&E. Analyzing the proportion of males vs. females in the second graph, the proportion of males is much lower in Non-S&E (~39% males) than in S&E (~50% males). **
+
+## EDA bringing type of degree, field and gender in 2015
+
+Describe the number of people by type of degree, field, and gender. Do you see any evidence of gender effects over different types of degrees? Again, provide graphs to summarize your findings.
+
+```{r, echo = TRUE}
+wsci %>% 
+  filter(Year == 2015) %>%
+  mutate(SE = ifelse(Field!="Non-S&E" , "S&E", "Non-S&E")) %>%
+  group_by(Degree, SE, Sex) %>%
+  summarise(SE_number = sum(Number)) %>%
+  ggplot(aes(x = SE, y = SE_number, fill = Sex)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_grid(Degree~., scales = "free_y") +
+  theme(axis.text.y = element_text(angle = 30)) +
+  geom_text(aes(label = SE_number), position = position_dodge(width = 1), size = 3) +
+  ggtitle("Degrees granted by S&E vs non-S&E by gender in 2015")
+
+wsci %>%
+  filter(Year == 2015) %>%
+  ggplot(aes(x = Field, y = Number, fill = Sex)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_grid(Degree~., scales = "free_y") +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1)) +
+  geom_text(aes(label = Number), position = position_dodge(width = 1), size = 2) +
+  ggtitle("Degrees granted across fields by degree and gender in 2015")
+```
+
+**The first graph shows that there are less males than females for Non-S&E fields for all degree types in 2015. For S&E types of fields, there are increasingly more males than females as the degree becomes higher, from BS to MS to PhD. The second graphs shows all the specific fields on a more granular level. There are more females than males for all three degree types for biological sciences and psychology. For agricultural sciences and social sciences, there are more females for BS and MS, but more males in PhD. For computer sciences, earth atmospheric and ocean sciences, mathematics and statistics and physical sciences, there are more males across all degree types. **
+
+## EDA bring all variables 
+
+In this last portion of the EDA, we ask you to provide evidence numerically and graphically: Do the number of  degrees change by gender, field, and time? 
+```{r, echo=TRUE}
+wsci %>%
+  group_by(Degree, Field, Sex) %>%
+  summarise(number = sum(Number)) %>%
+  ggplot(aes(x = Field, y = number, fill = Sex)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_grid(Degree~., scales = "free_y") +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1)) +
+  geom_text(aes(label = number), position = position_dodge(width = 1), size = 2) +
+  ggtitle("Types of degrees granted across fields by gender")
+
+wsci %>%
+  group_by(Degree, Year, Sex) %>%
+  summarise(number = sum(Number)) %>%
+  group_by(Sex, Year, Degree) %>%
+  ggplot(aes(x = Year, y = number, fill = Sex)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_grid(~Degree, scales = "free_y") +
+  ggtitle("Types of degrees granted by sex each year")
+```
+
+**The first graph is similar to the previous question, but instead sums the number of degrees for each field throughout the years instead of just looking at 2015. The trend summing up all the years is similar to the trend in 2015. It is shown that there are generally more females in non-S&E, psychology, social sciences, agricultural and biological sciences and more males in computer sciences, engineering, mathematics and statistics and physical sciences. The trend may differ slightly in some degree types, but overall shows this pattern.**
+
+**The second graph analyzes how the number of degrees change over time. All three degrees show an increasing trend over the years for both genders. This increase is especially noticeable for BS degrees. In addition, this graph shows the same gender gap over the years, with a male:female ratio of around 2:3 for BS and MS, and only slightly under 1:1 for PhD. The proportion of males and females remain similar so there is no evidence of any shifts in gender ratio throughout the years.**
+
+
+## Women in Data Science
+
+Finally, is there evidence showing that women are underrepresented in data science? Data science is an interdisciplinary field of computer science, math, and statistics. You may include year and/or degree.
+
+```{r, echo = TRUE}
+
+wsci %>%
+  filter(Field %in% c("Computer sciences", "Mathematics and statistics")) %>%
+  ggplot(aes(x = Year, y = Number, fill = Sex)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_grid(~Field, scales = "free_y") +
+  ggtitle("Data science degrees granted across all years")
+
+wsci %>%
+  filter(Field %in% c("Computer sciences", "Mathematics and statistics")) %>%
+  ggplot(aes(x = Year, y = Number, fill = Sex)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_grid(Field~Degree, scales = "free_y") +
+  ggtitle("Data science degrees granted by types of degree across all years")
+
+wsci %>%
+  mutate(DS = ifelse(Field %in% c("Computer sciences", "Mathematics and statistics"), "Data Science", "Others")) %>%
+  group_by(DS, Sex, Year, Degree) %>%
+  summarise(DS_number = sum(Number)) %>%
+  ggplot(aes(x = Year, y = DS_number, fill = Sex)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_grid(DS~Degree, scales = "free_y") +
+  ggtitle("Data science vs. other degrees")
+```
+
+**From the first graph, it can be concluded that there are less females in Computer Science. This major is dominated by male students and females are underrepresented. The growth in number is greater for males than females over the years. This gender gap is not as significant for Mathematics and Statistics, where the number of males is only slightly more than females.**
+
+**The second graph breaks it down further by separating it into different types of degrees. The proportion of males in Computer Science are larger for BS and PhD than for MS degree. However for Mathematics and Statistics, the proportion of males is the greatest for PhD, and not as significant for BS and MS degrees. For both majors, more degrees are given as time progresses, showing increasing popularity in Data Science. The growth is the most significant for BS degrees and least for PhD.**
+
+**Finally, the last graph compares Data Science to other degrees. They show an opposite pattern where there are more males in Data Science and more females in other degrees, but both have some gender gaps. The gender gap is a significantly greater problem for data science. For example, an estimate for male to female ratio for BS degrees is close to 3:1 for Data Science whereas the female to male ratio is only around 2:3 for other majors.**
+
+## Final brief report
+
+Summarize your findings focusing on answering the questions regarding if we see consistent patterns that more males pursue science-related fields. Any concerns with the data set? How could we improve on the study?
+
+**From the previous analysis, it can be concluded that more males pursue science-related fields. There are consistently more females in non-S&E fields and more males in fields such as computer science, mathematics and statistics, engineering and physical sciences. The gender gap remains an issue from 2006 to 2016, regardless of type of degree. Data science consists of computer science, mathematics and statistics, so it also shows a similar pattern of having more males. Finally, in general, there are more degrees being obtains as time goes on, showing an increasing popularity in pursuing higher education.**
+
+**With respect to the dataset, one concern is that it may be outdated. The data stops at 2016, and the study can be improved by collecting data in the more recent years to see if the trend is consistent. For example, data science is a new field that have recently become popular. Therefore, if the data for years after 2016 is added, it may show a different gender pattern, or a change in how large the gender gap is. The second conern is whether the data is comprehensive. We can improve on the study by checking institutional data outside of the government data and check if they are consistent. Furthermore, we can also check if there is any bias in the dataset. If only certain institution's data are chosen, it may not be reflective of others. For example, the pattern in an Institute of Technology may be different from Liberal Arts Colleges.** 
+
+## Appendix
+
+To help out, we have included some R-codes here as references. You should make your own chunks filled with texts going through each items listed above. Make sure to hide the unnecessary outputs/code etc. 
+
+1. Clean data
+
+```{r data wrangling, echo = FALSE, warning = FALSE}
+# For the demonstration purpose, we show this R-chunk by taking echo=TRUE
+# In your final report you should hide all the R-chunks to keep your report flowing well.
+wsci <- read_excel("/Users/liuyanqi/Desktop/STAT571/hw1/data/WomenData_06_16.xlsx")
+names(wsci)
+head(wsci)
+#change names
+wsci %<>%
+  rename(Field = 'Field and sex')
+#set the field, degree and sex as factors
+wsci %<>%
+  mutate( Field = as.factor(Field))
+```
+
+
+```{r, echo=FALSE}
+wsci <- read_excel("/Users/liuyanqi/Desktop/STAT571/hw1/data/WomenData_06_16.xlsx")
+
+wsci %<>%
+  rename(Field = "Field and sex",
+         Number = "Degrees Awarded") %>%
+  mutate(Field = as.factor(Field),
+         Degree = as.factor(Degree),
+         Sex = as.factor(Sex))
+```
+
+
+2. A number of sample analyses 
+
+```{r eval = FALSE, echo = FALSE}
+wsci %>%  # to get the average number of ppl by gender
+  group_by(Field, Sex) %>%
+  summarise(deg = mean(Number))
+
+wsci %>%
+  filter(Year == 2007) %>%
+  ggplot(aes(x = Field, y = Number, fill = Sex)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_grid(Degree~., scales = "free_y") +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1)) +
+  ggtitle("Degrees granted across fields by degree and gender")
+
+wsci %>%
+  mutate(SE = ifelse(Field!="Non-S&E" , "S&E", "Non-S&E")) %>%
+  group_by(SE, Sex) %>%
+  summarise(SE_number = sum(Number)) %>%
+  ggplot(aes(x = SE, y = SE_number, fill = Sex)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  theme(axis.text.y = element_text(angle = 60)) +
+  ggtitle("Degrees granted by S&E vs non-S&E by gender")
+
+wsci %>%
+  mutate(SE = ifelse(Field!="Non-S&E" , "S&E", "Non-S&E")) %>%
+  group_by(SE, Sex, Year) %>%
+  summarise(SE_number = sum(Number)) %>%
+  group_by(SE, Year) %>%
+  mutate(ratio = SE_number / sum(SE_number)) %>%
+  filter(Sex == "Female") %>%
+  ggplot(aes(x = Year, y = ratio, color = SE)) +
+  geom_point() + geom_line() +
+  ggtitle("Female proportion in SE/non-SE across year")
+
+wsci %>%
+  mutate(SE = ifelse(Field!="Non-S&E" , "S&E", "Non-S&E")) %>%
+  group_by(SE, Sex, Year, Degree) %>%
+  summarise(SE_number = sum(Number)) %>%
+  group_by(SE, Year, Degree) %>%
+  mutate(ratio = SE_number / sum(SE_number)) %>%
+  filter(Sex == "Female") %>%
+  ggplot(aes(x = Year, y = ratio, color = SE)) +
+  geom_point() + geom_line() +
+  facet_grid(~Degree)+
+  ggtitle("Female proportion in SE/non-SE across year by degree")
+
+
+wsci %>%
+  mutate(SE = ifelse(Field!="Non-S&E" , "S&E", "Non-S&E")) %>%
+  group_by(SE, Sex, Year, Degree) %>%
+  summarise(SE_number = sum(Number)) %>%
+  ggplot(aes(x = Year, y = SE_number, fill = Sex)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_grid(SE~Degree, scales = "free_y") +
+  ggtitle("Degrees granted by sex, degree and SE")
+
+
+wsci %>%
+  mutate(SE = ifelse(Field!="Non-S&E" , "S&E", "Non-S&E")) %>%
+  group_by(SE, Sex, Year, Degree) %>%
+  summarise(SE_number = sum(Number)) %>%
+  ggplot(aes(x = Year, y = SE_number, fill = Sex)) +
+  geom_bar(stat = "identity", position = "fill") +
+  facet_grid(SE~Degree, scales = "free_y") +
+  ggtitle("Degrees granted proportion by sex across degree and SE")
+
+
+wsci %>%
+  filter(Field %in% c("Computer sciences", "Mathematics and statistics")) %>%
+  ggplot(aes(x = Year, y = Number, fill = Sex)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_grid(Field~Degree, scales = "free_y") +
+  ggtitle("Degrees granted pr option by sex across degree and SE")
+
+
+wsci %>%
+  ggplot(aes(x = Year, y = Number, fill = Sex)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_grid(Field~Degree, scales = "free_y") +
+  ggtitle("Degrees granted proportion by sex across degree and SE")
+```
+
+
+
+# Case study 3: Major League Baseball
+
+We would like to explore how payroll affects performance among Major League Baseball teams. The data is prepared in two formats record payroll, winning numbers/percentage by team from 1998 to 2014. 
+
+Here are the datasets:
+
+-`MLPayData_Total.csv`: wide format
+-`baseball.csv`: long format
+
+Feel free to use either dataset to address the problems. 
+
+## EDA: Relationship between payroll changes and performance
+
+Payroll may relate to performance among ML Baseball teams. One possible argument is that what affects this year's performance is not this year's payroll, but the amount that payroll increased from last year. Let us look into this through EDA. 
+
+Create increment in payroll
+
+i. To describe the increment of payroll in each year there are several possible approaches. Take 2013 as an example:
+
+    - option 1: diff: payroll_2013 - payroll_2012
+    - option 2: log diff: log(payroll_2013) - log(payroll_2012)
+
+Explain why the log difference is more appropriate in this setup.
+
+**Log difference is looking at the relative increase from base while simple difference is just looking at the absolute numerical difference. In this setup, when looking at the effect of increase in payroll on performance, we need to compare the baseline since not every baseball team has the same previous year payroll and payroll changes every year. **
+
+
+
+ii. Create a new variable `diff_log=log(payroll_2013) - log(payroll_2012)`. Hint: use `dplyr::lag()` function.
+
+```{r, echo=TRUE, results='asis'}
+# use baseball.csv used to address the problem
+baseball <- read_csv("/Users/liuyanqi/Desktop/STAT571/hw1/data/baseball.csv")
+
+# create a new variable "previous_year_payroll" in table "baseball" to answer 4.1(ii)
+# create another variable "previous_year_win_pct" in table "baseball" to answer 4.3 and 4.4
+baseball <- 
+    baseball %>%
+    group_by(team) %>%
+    mutate(previous_year_payroll = lag(payroll, n = 1, default = NA)) %>%
+    mutate(previous_year_win_pct = lag(win_pct, n = 1, default = NA))
+
+# create two new variables "diff"(i.e. option 1) and diff_log"(i.e. option 2) in table "increment_payroll"
+increment_payroll <- 
+    baseball %>%
+    group_by(team) %>%
+    mutate(diff = payroll - previous_year_payroll) %>%
+    mutate(diff_log = log(payroll) - log(previous_year_payroll)) %>%
+    mutate(win_pct_inc = win_pct - previous_year_win_pct)
+```
+
+
+iii. Create a long data table including: team, year, diff_log, win_pct
+
+```{r, echo=TRUE, results='asis'}
+# create a long data table "final" including: team, year, diff_log, win_pct to answer 4.1(iii)
+final <- select(increment_payroll, team, year, diff_log, win_pct)
+knitr::kable(head(final, 10))
+```
+
+
+## Exploratory questions
+
+i. Which five teams had highest increase in their payroll between years 2010 and 2014, inclusive?
+
+**Los Angeles Dodgers, Texas Rangers, Washington Nationals, Toronto Blue Jays, San Francisco Giants.**
+
+```{r, echo=TRUE, fig2, fig.height = 10, fig.width = 15, results='asis'}
+baseball_4.2.1 <-
+    increment_payroll %>%
+    group_by(team) %>%
+    mutate(previous_4_year_payroll = lag(payroll, n = 4, default = NA))  %>%
+    mutate(increase_in_payroll = payroll - previous_4_year_payroll) %>%
+    filter(year == 2014) %>%
+    arrange(desc(increase_in_payroll)) %>%
+    select(team, increase_in_payroll) %>%
+    distinct(team, increase_in_payroll)
+
+par(mar=c(11,4,4,4))
+barplot(baseball_4.2.1$increase_in_payroll, names.arg=baseball_4.2.1$team, ylim=c(-70,150), main="Increase in Payroll between 2010 and 2014", ylab="Increase in Payroll", las=2)
+print(htmlTable(head(baseball_4.2.1, 5)))
+```
+
+
+ii. Between 2010 and 2014, inclusive, which team(s) "improved" the most? That is, had the biggest percentage gain in wins?
+
+**Pittsburgh Pirates, Baltimore Orioles, Washington Nationals, Seattle Mariners, Kansas City Royals.**
+
+```{r, echo=TRUE, fig1, fig.height = 10, fig.width = 15,  results='asis'}
+baseball_4.2.2 <-
+    increment_payroll %>%
+    group_by(team) %>%
+    mutate(previous_4_year_win_pct = lag(win_pct, n = 4, default = NA))  %>%
+    mutate(increase_in_win_pct = win_pct - previous_4_year_win_pct) %>%
+    filter(year == 2014) %>%
+    arrange(desc(increase_in_win_pct)) %>%
+    select(team, increase_in_win_pct) %>%
+    distinct(team, increase_in_win_pct)
+par(mar=c(11,4,4,4))
+barplot(baseball_4.2.2$increase_in_win_pct, ylim=c(-0.2,0.2), names.arg=baseball_4.2.2$team, main="Increase in Win Percentage between 2010 and 2014", ylab="Increase in Win Percentage", las=2)
+print(htmlTable(head(baseball_4.2.1, 5)))
+```
+
+## Do log increases in payroll imply better performance? 
+
+Is there evidence to support the hypothesis that higher increases in payroll on the log scale lead to increased performance?
+
+Pick up a few statistics, accompanied with some data visualization, to support your answer. 
+
+**When it comes to "performance", there are different intepretations about the increased performance. In the first case, we are looking at how overall performance (defined as annual win percentage) varies as a function of payroll changes. In the second case, we are looking at how changes in overall performance (defined as difference in annual win percentages) differ as a function of the payroll changes.**
+
+**First case: increase in payroll(diff_log) VS win percentage(win_pct)**
+```{r, echo=TRUE, results='asis', fig4, fig.height = 10, fig.width = 15}
+plot(increment_payroll$diff_log, increment_payroll$win_pct, main="Increase in Payroll VS Win Percentage", xlab="Increase in Payroll", ylab="Win Percentage", pch=19)
+abline(lm(win_pct ~ diff_log, data = increment_payroll), col='red')
+linear_model = lm(win_pct ~ diff_log, data = increment_payroll)
+tab_model(linear_model)
+```
+
+
+**Second case: increase in payroll(diff_log) VS increase in win percentage(win_pct_inc)**
+```{r, echo=TRUE, results='asis', fig3, fig.height = 10, fig.width = 15}
+plot(increment_payroll$diff_log, increment_payroll$win_pct_inc, main="Increase in Payroll VS Win Percentage", xlab="Increase in Payroll", ylab="Increase in Win Percentage", pch=19)
+abline(lm(win_pct_inc ~ diff_log, data = increment_payroll), col='red')
+linear_model = lm(win_pct_inc ~ diff_log, data = increment_payroll)
+tab_model(linear_model)
+
+```
+
+**In conclusion, there isn't a strong evidence to support the hypothesis that higher increases in payroll on the log scale lead to increased performance, in neither case 1 nor case 2. The regression lines in both graphs are not fitted well. The R-squred value in case 1 is 0.0279 and 0.00142 in case 2, which are very low. **
+
+## Comparison
+
+Which set of factors are better explaining performance? Yearly payroll or yearly increase in payroll? What criterion is being used? 
+
+**To answer this questions, we examined the correlation scores and R-sqaured values of "yearly payroll vs win percentage" and "yearly increase in payroll vs win percentage". The correlation is 0.345 for yearly paroll and 0.167 for the yearly increase in payroll. The R-squared is 0.119 for yearly payroll and 0.0279 for yearly increase in payroll(derived from 4.3). Both criteria confirm that yearly payroll is better explaining performance.**
+
+```{r, echo=TRUE, results='asis'}
+linear_model_yearly_payroll = lm(win_pct ~ payroll, data=baseball)
+tab_model(linear_model_yearly_payroll)
+```
+
+```{r, echo=TRUE, results='asis'}
+cor(baseball$payroll, baseball$win_pct)
+cor(na.omit(increment_payroll)$diff_log, na.omit(increment_payroll)$win_pct)
+```
+
