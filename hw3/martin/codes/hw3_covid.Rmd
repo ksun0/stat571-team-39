@@ -19,7 +19,7 @@ fontsize: 12pt
 
 ```{r setup, include=F, cache=FALSE}
 knitr::opts_chunk$set(echo = T, warning = F, message = F)
-knitr::opts_knit$set(root.dir = 'G:/github/stat571-team-39/hw3/liming')
+knitr::opts_knit$set(root.dir = 'G:/github/stat571-team-39/hw3/martin')
 output_format <- ifelse(is.null(knitr::opts_knit$get("rmarkdown.pandoc.to")),
                         "text", knitr::opts_knit$get("rmarkdown.pandoc.to"))
 options(scipen = 0, digits = 3)  # controls base R output
@@ -98,7 +98,7 @@ The biggest problem: daily variability is extremely high, making the trends zigz
 covid_rate[State == "New York",length(County),by = .(State,date)] # problem: some counties do not report cases in some days. New added counties cause problems
 ```
 
-We find that the number of counties reporting cases every day is incresaing. We may want to adjust the total population accordingly.
+We find that the number of counties reporting cases every day is increasing. We may want to adjust the total population accordingly.
 
 ```{r}
 covid.weekend = covid_rate[,.(
@@ -413,6 +413,10 @@ plot(fit.final.2,2)
 ```
 
 Seems not a good fit. Homoscedasticity is not well satisfied from the residual plot; from the residual plot we can see that the residuals have much thicker tails than the normal distribution.
+
+### Summary
+
+
 
 ### Improvements
 
