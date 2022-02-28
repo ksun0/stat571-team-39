@@ -1,15 +1,12 @@
 ---
 title: "Modern Data Mining, HW 3"
 author:
-- Group Member 1
-- Group Member 2
-- Group Member 3
+- Martin Ning
+- Hansen Wang
+- William Walsh
+- Kevin Sun
 date: 'Due: 11:59Pm,  2/27, 2022'
 output:
-  pdf_document:
-    number_sections: yes
-    toc: yes
-    toc_depth: '4'
   html_document:
     code_folding: hide
     highlight: haddock
@@ -18,6 +15,10 @@ output:
     toc: yes
     toc_depth: 4
     toc_float: yes
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: '4'
   word_document:
     toc: yes
     toc_depth: '4'
@@ -26,14 +27,36 @@ urlcolor: blue
 
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = T, fig.width=8, fig.height=4)
+knitr::opts_chunk$set(echo = T, warning = F, message = F)
+knitr::opts_knit$set(root.dir = '/Users/ksun/Downloads/stat571/stat571-team-39/hw3')
+output_format <- ifelse(is.null(knitr::opts_knit$get("rmarkdown.pandoc.to")),
+                        "text", knitr::opts_knit$get("rmarkdown.pandoc.to"))
 options(scipen = 0, digits = 3)  # controls base R output
-# check if you have ISLR package, if not, install it
-if(!require('pacman')) {install.packages('pacman')}
-pacman::p_load(ISLR, readxl, magrittr, dplyr, ggplot2) # add the packages needed
+library(data.table)
+library(reshape2)
+library(readxl)
+library(lubridate)
+library(tidyverse)
+library(cowplot)
+library(kableExtra)
+library(ggrepel)
+library(skimr)
+library(plotly)
+library(RColorBrewer)
+library(ggbiplot)
+library(factoextra)
+library(DescTools)
+library(irlba)
+library(ISLR)
+library(lmtest)
+library(stargazer)
+library(GGally)
+library(summarytools)
+library(usmap)
+library(glmnet)
+library(leaps)
+Sys.setlocale(,"English")
 ```
-
-
 \pagebreak
 
 # Overview
@@ -84,21 +107,532 @@ Final modelling question: We want to explore the effects of each feature as best
 1) Preparing variables: 
 
 a) You may explore the possibility of variable transformations. We normally do not suggest to transform $x$ for the purpose of interpretation. You may consider to transform $y$ to either correct the violation of the linear model assumptions or if you feel a transformation of $y$ makes more sense from some theory. In this case we suggest you to look into `GPM=1/MPG`. Compare residual plots of MPG or GPM as responses and see which one might yield a more satisfactory patterns. 
+```{r 1a, echo=TRUE, message=FALSE, warning=FALSE}
+Auto <- ISLR::Auto
+AutoCopy <- Auto
+AutoCopy$mpg <- 1/Auto$mpg
+colnames(AutoCopy)[which(colnames(AutoCopy) == "mpg")] <- "gpm"
+model1 <- lm(mpg ~ horsepower + weight + year + as.factor(Auto$origin), data = Auto)
+model2 <- lm(gpm ~ horsepower + weight + year + as.factor(AutoCopy$origin), data = AutoCopy)
+
+res1 <- resid(model1) 
+plot(fitted(model1), res1)
+abline(0,0)
+res2 <- resid(model2) 
+plot(fitted(model2), res2) 
+abline(0,0)
+
+```
 
 In addition, can you provide some background knowledge to support the notion: it makes more sense to model `GPM`?  
 
+From visual inspection of the two plots of the residuals, it is clear that there
+was captured structure in the MPG fit while this un captured trend was picked up
+in the GPM plot. This makes sense because linear increases in weight would lead
+to increased fuel consumption, not fuel efficiency. Its 
+
+Linear relationship not inverse relationship
+
 b) You may also explore by adding interactions and higher order terms. The model(s) should be as *parsimonious* (simple) as possible, unless the gain in accuracy is significant from your point of view. 
 
+```{r 1b, echo=TRUE, message=FALSE, warning=FALSE}
+
+model3 <- lm(gpm ~ horsepower + weight + year + as.factor(AutoCopy$origin) + 
+               (horsepower + weight + year)^2 + 
+               I(horsepower^2) + I(horsepower^3) +
+               I(weight^2) + I(weight^3) +
+               I(year^2) + I(year^3)
+               , data = AutoCopy)
+
+model3.exh <- regsubsets(gpm ~ horsepower + weight + year + 
+                           as.factor(AutoCopy$origin) + 
+               (horsepower + weight + year)^2 + 
+               I(horsepower^2) + I(horsepower^3) +
+               I(weight^2) + I(weight^3) +
+               I(year^2) + I(year^3)
+               , data = AutoCopy,  nvmax=25, method="exhaustive")
+
+f.e <- summary(model3.exh)
+names(f.e)
+str(f.e)
+plot(f.e$cp, xlab="Number of predictors", 
+     ylab="Cp", col="red", pch=16)
+
+model4 <- lm(gpm ~ horsepower + weight + year + as.factor(AutoCopy$origin) + 
+               (horsepower + weight + year)^2 + 
+               I(horsepower^2) + I(horsepower^3) +
+               I(weight^2) + I(weight^3) 
+               , data = AutoCopy)
+
+model4.exh <- regsubsets(gpm ~ horsepower + weight + year + 
+                           as.factor(AutoCopy$origin) + 
+               (horsepower + weight + year)^2 + 
+               I(horsepower^2) + I(horsepower^3) +
+               I(weight^2) + I(weight^3)
+               , data = AutoCopy,  nvmax=25, method="exhaustive")
+
+f.e <- summary(model4.exh)
+names(f.e)
+str(f.e)
+plot(f.e$cp, xlab="Number of predictors", 
+     ylab="Cp", col="red", pch=16)
+
+```
 c) Use Mallow's $C_p$ or BIC to select the model.
+
+Using the "elbow" rule, the cp appears to level off around 6, so we will 
+select 6 predictors as the chosen model.
+
+After inspecting the variables chosen by the size 6 optimal model, the
+3rd and fourth terms were found to be year squared and year cubed, one having
+a positive coefficient and the other having a negative coefficient. This is not
+easily interpreted (why does year squared decrease gpm but year cubed increase?)
+
+For easier interpret ability, in the final mode, we elect to exclude higher
+order terms on year. After re-running the CP selection process, the new
+optimal model was found to be of size four (using the elbow rule).
+
+
 
 2) Describe the final model and its accuracy. Include diagnostic plots with particular focus on the model residuals.
 
   * Summarize the effects found.
   * Predict the `mpg` of a car that is: built in 1983, in the US, red, 180 inches long, 8 cylinders, 350 displacement, 260 as horsepower, and weighs 4,000 pounds. Give a 95% CI.
   * Any suggestions as to how to improve the quality of the study?
+  
 
+After eliminating year higher order terms due to interpretability issues, 
+the optimal model found has terms
+
+- weight                increasing gpm
+- horsepower:weight     decreasing gpm
+- horsepower:year       increasing gpm
+- weight:year           decreasing gpm
+
+This model is far more interpretable, with weight and horsepower*year having 
+easy to interpret stories. As cars get heavier, they use more gas. As cars get
+newer and more powerful, they consume more gpm. As cars get heavier and newer, 
+they consume less gpm compared to an older car of similar weight.
+
+```{r 2, echo=TRUE, message=FALSE, warning=FALSE}
+coef(model3.exh,6)
+coef(model4.exh,4)
+fit.final <- lm(gpm ~ weight  + horsepower:weight + horsepower:year + weight:year, AutoCopy )   
+par(mfrow=c(1,2))
+plot(fit.final, 1)
+plot(fit.final, 2) 
+
+newcar <- AutoCopy [1,] # Get the right format and the variable names
+newcar$year <- 83
+newcar$origin <- as.factor(1)
+newcar$cylinders <- 8
+newcar$displacement <-350
+newcar$horsepower <- 260
+newcar$weight <- 4000
+
+newcar.gpm <- predict(fit.final, newcar, interval="confidence", se.fit=TRUE) 
+newcar.gpm
+
+newcar.mpg <- 1/newcar.gpm$fit
+newcar.mpg
+
+```
+
+The predicted MPG confidence interval ranges from 15.7 to 18.8mpg, with a 
+fitted value of 17.1 mpg. 
+
+
+
+How we can improve the model?
+
+Using principle components could possibly lead to a better "fit" at the expense
+of interpret ability. If we seek to retain a high level of interpret ability, we 
+have to accept a bit of modeling error. 
+
+Perhaps most important, using clustering analysis to cluster similar automobiles
+could lead to a better result, since there are likely non-linear and non-polynomial
+influences of variables (no power of weight will pick up whether the car is a pickup
+truck or not, etc.)
 
 # Case study 2: COVID
 
 See covid_case_study.Rmd.
 
+# covid case
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+# county-level socialeconomic information
+county_data <- fread("data/covid_county.csv")
+# county-level COVID case and death
+covid_rate <- fread("data/covid_rates.csv")
+# county-level lockdown dates
+covid_intervention <- fread("data/covid_intervention.csv")
+
+```
+
+## understand the data
+
+```{r,eval=F, echo=TRUE, message=FALSE, warning=FALSE}
+view(dfSummary(covid_rate),method = "render")
+view(dfSummary(county_data),method = "render")
+```
+
+## covid case trend 
+
+### three states, by day and state
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+# unique(covid_rate$State)
+covid.3state.day = covid_rate[State %in% c("New York","Washington","Florida"),.(
+  cum_cases = sum(cum_cases),
+  cum_deaths = sum(cum_deaths),
+  week = mean(week)
+),by = .(date,State)]
+covid.3state.day = covid.3state.day[order(list(State,date))]
+
+covid.3state.day[,new_cases := c(NA,diff(cum_cases)),by = State]
+covid.3state.day[,date := ymd(date)]
+ggplot(covid.3state.day,aes(x=date,y=new_cases,group=State,color=State))+
+  geom_line()+
+  scale_x_date(date_breaks = "3 month",date_labels = "%Y-%m")+
+  labs(title = "New Cases Trends for NY, WA and FL")+
+  theme_bw()
+```
+
+The biggest problem: daily variability is extremely high, making the trends zigzagging. Maybe there is an innate difference among days in a week because people have different work and life style in different days. We may wish to smooth out these excessive noise by aggregating in the weekly level.
+
+### (ii)
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+# check
+covid_rate[State == "New York",length(County),by = .(State,date)] # problem: some counties do not report cases in some days. New added counties cause problems
+```
+
+We find that the number of counties reporting cases every day is increasing. We may want to adjust the total population accordingly.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+covid.weekend = covid_rate[,.(
+  cum_cases_weekend = cum_cases[length(cum_cases)],
+  cum_deaths_weekend = cum_deaths[length(cum_deaths)],
+  TotalPopEst2019.weekend = TotalPopEst2019[length(TotalPopEst2019)]
+), by = .(week,State,County)]
+covid.weekend = covid.weekend[order(list(State,County,week))]
+covid.weekend[,":="(new_cases = c(NA,diff(cum_cases_weekend)),
+                                 new_deaths = c(NA,diff(cum_deaths_weekend))),
+                           by = .(State,County)]
+covid.week = covid.weekend[!is.na(new_cases)&!is.na(new_deaths),.(
+  new_cases = sum(new_cases),
+  new_deaths = sum(new_deaths),
+  TotalPopEst2019 = sum(TotalPopEst2019.weekend)
+),by = .(State,week)]
+covid.week[,weekly_case_per100k := new_cases/TotalPopEst2019*100000]
+
+# data.ma = covid_rate[State == "Massachusetts"] # pay attention: week 33 of MA
+
+ggplot(covid.week,aes(x=week,y=weekly_case_per100k,group=State,color=State))+
+  geom_line()+
+  labs(title = "Spaghetti Plots, Weekly New Cases")+
+  theme_bw()
+```
+
+### (iii)
+
+
+
+### (iv)
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+# summary(covid_intervention)
+# some examples
+
+covid_intervention[STATE == "New York"]
+covid_intervention_state = covid_intervention[substr(FIPS,nchar(FIPS)-2,nchar(FIPS)) == "000"]
+
+# NY
+ggplot(covid.3state.day[State == "New York"],aes(x=date,y=new_cases))+
+  geom_line()+
+  scale_x_date(date_breaks = "3 month",date_labels = "%Y-%m")+
+  geom_vline(xintercept = covid_intervention_state[STATE == "NY","stay at home"][[1,1]],color = "red",lty = 5)+
+  labs(title = "New Cases Trends for NY")+
+  theme_bw()
+
+# FL
+ggplot(covid.3state.day[State == "Florida"],aes(x=date,y=new_cases))+
+  geom_line()+
+  scale_x_date(date_breaks = "3 month",date_labels = "%Y-%m")+
+  geom_vline(xintercept = covid_intervention_state[STATE == "FL","stay at home"][[1,1]],color = "red",lty = 5)+
+  labs(title = "New Cases Trends for FL")+
+  theme_bw()
+
+```
+
+The graphs for these two states indicate that the lockdown policy may have some positive effects on slowing down the spread of the virus.
+
+## covid death trend
+
+### Monthly deaths per 100k heatmap
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+# pay attention to numbers smaller than zero
+covid_rate = covid_rate[order(FIPS,date)]
+covid_rate[,":="(new_cases = c(NA,diff(cum_cases)),
+                 new_deaths = c(NA,diff(cum_deaths)),
+                 year = year(date),
+                 month = month(date),
+                year.month = round_date(date,"month")),by = FIPS]
+covid.month = covid_rate[!is.na(new_cases)&!is.na(new_deaths),.(
+  new_cases = sum(new_cases),
+  new_deaths = sum(new_deaths),
+  TotalPopEst2019 = TotalPopEst2019[length(TotalPopEst2019)]
+),by = .(State,County,year,month)]
+covid.month = covid.month[,.(
+  new_cases = sum(new_cases),
+  new_deaths = sum(new_deaths),
+  TotalPopEst2019 = sum(TotalPopEst2019)
+),by = .(State,year,month)]
+
+covid.month[,monthly_death_per100k := new_deaths/TotalPopEst2019*100000]
+```
+
+Here we only give one example: 2020-9. The plots for all months are shown in (ii). 
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+covid.death.plot.list = list()
+setnames(covid.month,"State","state")
+max_col = quantile(covid.month$monthly_death_per100k,1,na.rm = T)
+min_col = quantile(covid.month$monthly_death_per100k,0,na.rm = T)
+for (i in 2:12) {
+  covid.death.plot.list[[i-1]] =
+    plot_usmap(regions = "state",data = covid.month[year == 2020 & month == i],
+               values = "monthly_death_per100k", exclude = c("Hawaii", "Alaska"),color = "black") + 
+    scale_fill_distiller(
+      palette = "Reds",direction = 1,
+      name = "Number of New Covid Deaths per 100,000 People", 
+      limits = c(min_col, max_col)) + 
+    labs(title = paste0("New Covid Deaths, 2020-",i), subtitle = "Continental US States") +
+    theme(legend.position = "right")
+}
+
+ggplotly(covid.death.plot.list[[8]])
+
+# plot_usmap(regions = "state",data = covid.month[year == 2020 & month == i],
+#                values = "monthly_death_per100k", exclude = c("Hawaii", "Alaska"),color = "black") + 
+#     scale_fill_gradient(
+#       low = "white", high = "red", 
+#       name = "Number of New Covid Deaths per 100,000 People", 
+#       label = scales::comma) + 
+#     labs(title = paste0("New Covid Deaths, 2020-",i), subtitle = "Continental US States") +
+#     theme(legend.position = "right")
+
+
+```
+
+### (ii)
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+# ggplotly
+
+test.long = covid.month[year == 2020,.(month,state,monthly_death_per100k)]
+# test = test.long %>%
+#   pivot_wider(names_from = month,values_from = monthly_death_per100k) %>%
+#   mutate(state = tolower(state))
+# 
+# map.wide = test %>% 
+#   left_join(map_data("state"),by = c("state" = "region"))
+# map.wide = data.table(map.wide)
+# map = map.wide[order(order)] %>% 
+#   pivot_longer(cols = 2:13,names_to = "month",values_to = "monthly_death_per100k") %>% 
+#   mutate(month = as.numeric(month))
+# map = data.table(map)
+# map = map[order(list(month,order))]
+# 
+# plot.test = ggplot(map,aes(x=long,y=lat,group=group))+
+#   geom_polygon(aes(fill = monthly_death_per100k))+
+#   geom_path()+
+#   scale_fill_distiller(palette = "Reds", direction = 1,
+#                        name = "Num", 
+#       limits = c(min_col, max_col))+
+#   labs(title = paste0("New Monthly Covid Deaths per 100k"), subtitle = "Continental US States")+
+#   theme_bw()
+# ggplotly(plot.test) # error?
+
+# plotly
+abbr = unique(us_map(regions =
+"states") %>% select(abbr, full)) 
+
+plotly.data = covid.month[year == 2020,.(month,state,monthly_death_per100k)] %>%
+  mutate(hover =  paste(state, '<br>', 
+                        'new covid deaths', round(monthly_death_per100k, 3))) %>% 
+  left_join(abbr,by = c("state" = "full"))
+
+# give state boundaries a white border
+l <- list(color = toRGB("white"), width = 2)
+# specify some map projection/options
+g <- list(
+  scope = 'usa',
+  projection = list(type = 'albers usa'),
+  showlakes = TRUE,
+  lakecolor = toRGB('white'),
+  exclude = c("")
+)
+
+fig <- plot_geo(plotly.data, locationmode = 'USA-states')
+fig <- fig %>% add_trace(
+    z = ~monthly_death_per100k, text = ~hover, locations = ~abbr,
+    color = ~monthly_death_per100k, colors = 'Reds',
+    zmin = min_col, zmax = max_col,frame = ~month
+  )
+
+fig <- fig %>% colorbar(title = "Monthly new covid deaths of state")
+fig <- fig %>% layout(
+    title = 'Monthly new covid deaths of state',
+    geo = g,
+    hoverlabel = list(bgcolor="white")
+  )
+fig
+```
+
+```{r,eval=F, echo=TRUE, message=FALSE, warning=FALSE}
+save.image("codes/hw3_covid.RData")
+```
+
+```{r,eval=F, echo=TRUE, message=FALSE, warning=FALSE}
+load("codes/hw3_covid.RData")
+```
+
+
+## covid factor
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+county.covid = covid_rate[date == as.Date("2021-02-01"),.(
+  FIPS,County,State,
+  total_death_per100k = cum_deaths/TotalPopEst2019*100000
+)] %>% 
+  right_join(county_data, by = "FIPS") %>%
+  mutate(log_total_death_per100k = log(total_death_per100k + 1))
+
+county.covid.sub <- county.covid %>%
+  select(log_total_death_per100k,State.x,County.x, FIPS, Deep_Pov_All, PovertyAllAgesPct, PerCapitaInc, UnempRate2019, PctEmpFIRE, PctEmpConstruction, PctEmpTrans, PctEmpMining, PctEmpTrade, PctEmpInformation, PctEmpAgriculture, PctEmpManufacturing, PctEmpServices, PopDensity2010, OwnHomePct, Age65AndOlderPct2010, TotalPop25Plus, Under18Pct2010, Ed2HSDiplomaOnlyPct, Ed3SomeCollegePct, Ed4AssocDegreePct, Ed5CollegePlusPct, ForeignBornPct, Net_International_Migration_Rate_2010_2019, NetMigrationRate1019, NaturalChangeRate1019, TotalPopEst2019, WhiteNonHispanicPct2010, NativeAmericanNonHispanicPct2010, BlackNonHispanicPct2010, AsianNonHispanicPct2010, HispanicPct2010, Type_2015_Update, RuralUrbanContinuumCode2013, UrbanInfluenceCode2013, Perpov_1980_0711, HiCreativeClass2000, HiAmenity, Retirement_Destination_2015_Update)
+
+setnames(county.covid.sub,c("State.x","County.x"),c("state","county"))
+```
+
+**Num of missings in every variable**
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+# county.covid.sub[is.na(state)]
+apply(is.na(county.covid.sub), 2, sum) # missing in state, county: all aggregate states, puerto rico, hawaii, alaska; bedford in Virginia has two obs, duplicated
+
+county.covid.sub = na.omit(county.covid.sub) # -174
+```
+
+### lasso
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+set.seed(1)
+model.var = model.matrix(log_total_death_per100k~.,data = county.covid.sub[,-c("FIPS","county")])[,-1] # no Alabama here
+# head(model.test)
+death = county.covid.sub[,log_total_death_per100k]
+fit1.cv = cv.glmnet(model.var,death,alpha = 1, nfolds = 10, intercept = T,
+                    penalty.factor = c(rep(0,48),rep(1,ncol(model.var)-48))) # alpha: the para in elastic net
+coef.min = coef(fit1.cv,s="lambda.1se") # more parsimonious usually. If use min, maybe there is noise
+# coef(fit1.cv,s="lambda.1min")
+nonzero.coef = coef.min[which(coef.min!=0),]
+# plot(fit1.cv)
+nonzero.var = names(nonzero.coef)[-1]
+```
+
+### Fine tune the model
+
+**Relaxed lasso result**
+
+```{r,results='asis', echo=TRUE, message=FALSE, warning=FALSE}
+data.selected = data.table(death,model.var[,which(colnames(model.var) %in% nonzero.var)])
+
+fit.1se.lm = lm(death~.,data = data.selected)
+# relaxed lasso
+stargazer(fit.1se.lm,type=output_format, align=TRUE)
+```
+
+**BIC graphs**
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+fit.final.1 =  regsubsets(death~.,data = data.selected,method = "exhaustive",
+                          nvmax = ncol(data.selected)-1,force.in = c(1:48),really.big = T) # compared to Arizona
+
+summary.fit.final.1 = summary(fit.final.1)
+plot(summary.fit.final.1$bic)
+opt.index = 10 # with bic
+```
+
+We choose $p=10$ by BIC criteria.
+
+**Final model after fine tuning**
+
+```{r,results='asis', echo=TRUE, message=FALSE, warning=FALSE}
+bic.var.select = summary.fit.final.1$which[opt.index,-1]
+bic.var = names(bic.var.select)[which(bic.var.select)] 
+# bic.var
+final.expr = as.formula(paste("death", "~", paste(bic.var, collapse = "+"))) 
+fit.final.2 = lm(final.expr,data = data.selected)
+
+stargazer(fit.final.2,type=output_format, align=TRUE)
+# all significant
+```
+
+Age65AnOlderPct2010 has a significantly positive coefficient. However, Under18Pct2010 also has a significantly positive coefficient and is larger than that for elderly. This does not give strong support to the argument that covid affects the elderly the most; we would rather interpret it as, covid affect the middle ages the least.
+
+BlackPct is not in the regression after controlling for existing variables while HispanicPct is in the regression. The coefficient for it is significantly positive, indicating that a higher Hispanic percentage in the region is connected with a higher fatal rate of covid. The analysis gives some support on a higher fatal rate in Hispanic group; it is not very clear for the black group.
+
+
+### diagnosis
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+scatter.list = list()
+
+for (i in 49:58) { # cannot do this. the plot is built only after it's invoked if in the loop? Use aes_string
+  name = bic.var[i]
+  scatter.list[[i-48]] = ggplot(data.selected,aes_string(x=name,y="death"))+
+    geom_point()+
+    geom_smooth(method = "lm")+
+    xlab(name)+
+    ylab("log.new.death")+
+    theme_bw()
+}
+```
+
+**Scatter Plots**
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+plot_grid(plotlist = scatter.list)
+
+# hist(county.covid$total_death_per100k,breaks = seq(0,900,10))
+```
+
+**Residual Plot**
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+# residual plot
+plot(fit.final.2,1)
+```
+
+**QQ Plot**
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+# qq plot
+plot(fit.final.2,2)
+```
+
+Seems not a good fit. Homoscedasticity is not well satisfied from the residual plot; from the residual plot we can see that the residuals have much thicker tails than the normal distribution.
+
+### Summary
+
+
+
+### Improvements
+
+From the scatter plots presented above, we can see that there are a lot of counties with zero in log total covid death per 100k and they are distant to other observations. Therefore, we may consider mixture models (for example, zero-inflated model) and classify them into two groups first, then make inference within every group. 
+
+As with the possible important variables, medical conditions could be one of them. Also total number of death per 100k may not be a perfect measure for our goal because it contains a part of randomness, i.e., the spread of covid in an area can have some random determinants; the virus might unexpectedly break out in some areas and result in a higher infection rate and mortality rate. We may want to complement the analysis with another dependent variable like $\frac{TotalDeaths}{TotalCases}$. 
+
+### Possible Imputations
+
+Missing values are clustered in Puerto Rico, Alaska. These states are different in property with continent states so we may not trust the imputation results.
