@@ -63,10 +63,12 @@ covid_intervention <- fread("data/covid_intervention.csv")
 
 ## understand the data
 
-```{r,eval=F}
+```{r,eval=T}
 view(dfSummary(covid_rate),method = "render")
 view(dfSummary(county_data),method = "render")
 ```
+
+Covid_rate data set has 10008984 observations and 8 variables; it is a wide panel data with a time interval from 2020-01-21 to 2021-02-20. County_data data set has 3279 observations and 208 variables. It is a cross-sectional data with 3279 counties. The missing values are not prevalent in these two data sets.
 
 ## covid case trend 
 
@@ -221,7 +223,7 @@ ggplotly(covid.death.plot.list[[8]])
 ```{r}
 # ggplotly
 
-test.long = covid.month[year == 2020,.(month,state,monthly_death_per100k)]
+# test.long = covid.month[year == 2020,.(month,state,monthly_death_per100k)]
 # test = test.long %>%
 #   pivot_wider(names_from = month,values_from = monthly_death_per100k) %>%
 #   mutate(state = tolower(state))

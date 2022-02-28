@@ -1,11 +1,11 @@
 ---
 title: "Modern Data Mining, HW 3"
 author:
-- Martin Ning
+- Liming Ning
 - Hansen Wang
 - William Walsh
 - Kevin Sun
-date: 'Due: 11:59Pm,  2/27, 2022'
+date: '2/27, 2022'
 output:
   html_document:
     code_folding: hide
@@ -57,46 +57,9 @@ library(glmnet)
 library(leaps)
 Sys.setlocale(,"English")
 ```
+
 \pagebreak
 
-# Overview
-
-Multiple regression is one of the most popular methods used in statistics as well as in machine learning. We use linear models as a working model for its simplicity and interpretability. It is important that we use domain knowledge as much as we could to determine the form of the response as well as the function format for the factors. Then, when we have many possible features to be included in the working model it is inevitable that we need to choose a best possible model with a sensible criterion. `Cp`, `BIC` and regularizations such as LASSO are introduced. Be aware that if a model selection is done formally or informally, the inferences obtained with the final `lm()` fit may not be valid. Some adjustment will be needed. This last step is beyond the scope of this class. Check the current research line that Linda and collaborators are working on. 
-
-This homework consists of two parts: the first one is an excercise (you will feel it being a toy example after the covid case study) to get familiar with model selection skills such as, `Cp` and `BIC`. The main job is a rather involved case study about devastating covid19 pandemic.  Please read through the case study first. It is time that group members work together to run a real project. This project is for sure a great one listed in your CV. 
-
-For covid case study, the major time and effort would be needed in EDA portion.
-
-## Objectives
-
-- Model building process
-
-- Methods
-    - Model selection
-        + All subsets
-        + Forward/Backward
-    - Regularization
-        + LASSO (L1 penalty)
-        + Ridge (L2 penalty)
-        + Elastic net
-- Understand the criteria 
-    - `Cp`
-    - Testing Errors
-    - `BIC` 
-    - `K fold Cross Validation`
-    - `LASSO` 
-- Packages
-    - `lm()`, `Anova`
-    - `regsubsets()`
-    - `glmnet()` & `cv.glmnet()`
-
-# Review materials
-
-- Study lecture: Model selection
-- Study lecture: Regularization
-- Study lecture: Multiple regression
-
-Review the code and concepts covered during lectures: multiple regression, model selection and penalized regression through elastic net. 
 
 # Case study 1:  `ISLR::Auto` data
 
@@ -104,9 +67,10 @@ This will be the last part of the Auto data from ISLR. The original data contain
 
 Final modelling question: We want to explore the effects of each feature as best as possible. 
 
-1) Preparing variables: 
+## Preparing variables: 
 
 a) You may explore the possibility of variable transformations. We normally do not suggest to transform $x$ for the purpose of interpretation. You may consider to transform $y$ to either correct the violation of the linear model assumptions or if you feel a transformation of $y$ makes more sense from some theory. In this case we suggest you to look into `GPM=1/MPG`. Compare residual plots of MPG or GPM as responses and see which one might yield a more satisfactory patterns. 
+
 ```{r 1a, echo=TRUE, message=FALSE, warning=FALSE}
 Auto <- ISLR::Auto
 AutoCopy <- Auto
@@ -127,11 +91,12 @@ abline(0,0)
 In addition, can you provide some background knowledge to support the notion: it makes more sense to model `GPM`?  
 
 From visual inspection of the two plots of the residuals, it is clear that there
-was captured structure in the MPG fit while this un captured trend was picked up
-in the GPM plot. This makes sense because linear increases in weight would lead
-to increased fuel consumption, not fuel efficiency. Its 
+was uncaptured structure in the MPG fit while this uncaptured trend was somewhat picked up
+in the GPM plot. The residual plot in the former model is unbalanced: errors are all positive when y is small. The latter model with a reciprocal transformation solves this anomaly. The transformation makes sense because linear increases in weight would lead
+to increased fuel consumption, not fuel efficiency. 
 
-Linear relationship not inverse relationship
+When using a linear or higher power model, it makes sense to have the response
+variable directly related, not inversely related.
 
 b) You may also explore by adding interactions and higher order terms. The model(s) should be as *parsimonious* (simple) as possible, unless the gain in accuracy is significant from your point of view. 
 
@@ -178,6 +143,7 @@ plot(f.e$cp, xlab="Number of predictors",
      ylab="Cp", col="red", pch=16)
 
 ```
+
 c) Use Mallow's $C_p$ or BIC to select the model.
 
 Using the "elbow" rule, the cp appears to level off around 6, so we will 
@@ -194,7 +160,7 @@ optimal model was found to be of size four (using the elbow rule).
 
 
 
-2) Describe the final model and its accuracy. Include diagnostic plots with particular focus on the model residuals.
+## Describe the final model and its accuracy. Include diagnostic plots with particular focus on the model residuals.
 
   * Summarize the effects found.
   * Predict the `mpg` of a car that is: built in 1983, in the US, red, 180 inches long, 8 cylinders, 350 displacement, 260 as horsepower, and weighs 4,000 pounds. Give a 95% CI.
@@ -256,9 +222,6 @@ truck or not, etc.)
 
 # Case study 2: COVID
 
-See covid_case_study.Rmd.
-
-# covid case
 
 ```{r, echo=TRUE, message=FALSE, warning=FALSE}
 # county-level socialeconomic information
@@ -272,14 +235,17 @@ covid_intervention <- fread("data/covid_intervention.csv")
 
 ## understand the data
 
-```{r,eval=F, echo=TRUE, message=FALSE, warning=FALSE}
+```{r,eval=T, echo=TRUE, message=FALSE, warning=FALSE}
 view(dfSummary(covid_rate),method = "render")
 view(dfSummary(county_data),method = "render")
 ```
 
+Covid_rate data set has 10008984 observations and 8 variables; it is a wide panel data with a time interval from 2020-01-21 to 2021-02-20. County_data data set has 3279 observations and 208 variables. It is a cross-sectional data with 3279 counties. The missing values are not prevalent in these two data sets.
+
 ## covid case trend 
 
 ### three states, by day and state
+
 ```{r, echo=TRUE, message=FALSE, warning=FALSE}
 # unique(covid_rate$State)
 covid.3state.day = covid_rate[State %in% c("New York","Washington","Florida"),.(
@@ -300,7 +266,7 @@ ggplot(covid.3state.day,aes(x=date,y=new_cases,group=State,color=State))+
 
 The biggest problem: daily variability is extremely high, making the trends zigzagging. Maybe there is an innate difference among days in a week because people have different work and life style in different days. We may wish to smooth out these excessive noise by aggregating in the weekly level.
 
-### (ii)
+### Spaghetti Plots
 
 ```{r, echo=TRUE, message=FALSE, warning=FALSE}
 # check
@@ -334,11 +300,11 @@ ggplot(covid.week,aes(x=week,y=weekly_case_per100k,group=State,color=State))+
   theme_bw()
 ```
 
-### (iii)
+### Summary
 
+There are two possibilities to explain this. Firstly, many states, such as those in the Northeastern part of California, have densely populated urban centers. COVID tends to spread a lot quicker in these areas. Secondly, some states imposed stricter lockdown measures and mask-mandates early on to combat the COVID pandemic. These initiatives likely slowed the spread of COVID.
 
-
-### (iv)
+### Effectiveness of lockdown by graphs
 
 ```{r, echo=TRUE, message=FALSE, warning=FALSE}
 # summary(covid_intervention)
@@ -425,12 +391,12 @@ ggplotly(covid.death.plot.list[[8]])
 
 ```
 
-### (ii)
+### Animations
 
-```{r, echo=TRUE, message=FALSE, warning=FALSE}
+```{r, echo=F, message=FALSE, warning=FALSE}
 # ggplotly
 
-test.long = covid.month[year == 2020,.(month,state,monthly_death_per100k)]
+# test.long = covid.month[year == 2020,.(month,state,monthly_death_per100k)]
 # test = test.long %>%
 #   pivot_wider(names_from = month,values_from = monthly_death_per100k) %>%
 #   mutate(state = tolower(state))
@@ -453,7 +419,9 @@ test.long = covid.month[year == 2020,.(month,state,monthly_death_per100k)]
 #   labs(title = paste0("New Monthly Covid Deaths per 100k"), subtitle = "Continental US States")+
 #   theme_bw()
 # ggplotly(plot.test) # error?
+```
 
+```{r}
 # plotly
 abbr = unique(us_map(regions =
 "states") %>% select(abbr, full)) 
@@ -625,7 +593,7 @@ Seems not a good fit. Homoscedasticity is not well satisfied from the residual p
 
 ### Summary
 
-
+We observe that controlling for other factors, a couple of the state predictors are statistically significant. In particular, we observe that states such as California, Colorado, Idaho, Kansas, Maine, Missouri, Nebraska, etc., have significant negative correlations. On the other hand, states like Mississippi and Louisiana all have significant positive correlations. The States with a higher COVID death rate tend to be Southern states with looser COVID restrictions and mask mandates. Despite having significantly higher population density, many States in the Northeast, such as Massachusetts and Vermont, fared better. This potentially suggests a strong case for COVID intervention. The government should continue to impose mask mandates and lockdown measures if a significant spike in cases happens in the future.
 
 ### Improvements
 
