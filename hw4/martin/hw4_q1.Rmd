@@ -1,0 +1,347 @@
+---
+title: "HW4"
+author: "Liming Ning"
+date: "2022/3/18"
+geometry: margin=1in
+output:
+  html_document:
+    code_folding: hide
+    highlight: haddock
+    number_sections: yes
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+urlcolor: blue
+always_allow_html: true
+indent: true 
+fontsize: 12pt
+---
+
+```{r setup, include=F, cache=FALSE}
+knitr::opts_chunk$set(echo = T, warning = F, message = F)
+knitr::opts_knit$set(root.dir = 'G:/github/stat571-team-39/hw4/martin')
+output_format <- ifelse(is.null(knitr::opts_knit$get("rmarkdown.pandoc.to")),
+                        "text", knitr::opts_knit$get("rmarkdown.pandoc.to"))
+options(scipen = 0, digits = 4)  # controls base R output
+if(!require('pacman')) {
+  install.packages('pacman')
+}
+pacman::p_load(data.table, reshape2, readxl, lubridate, tidyverse, pROC, cowplot,
+               kableExtra, RColorBrewer, lmtest, stargazer, bestglm, summarytools, glmnet, leaps,caret)
+Sys.setlocale(,"English")
+```
+
+# Q1
+
+```{r}
+hd.data = fread("Framingham.dat")
+setnames(hd.data,1,"HD")
+hd.data[,":="(HD = as.factor(HD),SEX = as.factor(SEX))]
+view(dfSummary(hd.data),method = "render") # some missings here
+hd.data.clean = na.omit(hd.data)
+```
+
+## Identifying risk factors
+
+### Understand the likelihood func
+
+**5 samples**
+
+```{r}
+set.seed(50)
+sample.hd = hd.data.clean[sample(nrow(hd.data.clean),5),.(HD,SBP)]
+kbl(sample.hd,caption = '5 samples of hd data set', booktabs = T,linesep = "")%>%
+  kable_styling(latex_options = c("HOLD_position"))
+```
+
+**Likelihood function**
+
+Generally, 
+
+$$L(\beta,Data) = \Pi_{i=1}^5 \theta_i^{y_i} (1-\theta_i)^{1-y_i}=\Pi_{i=1}^5 (\frac{e^{x_i'\beta}}{1+e^{x_i'\beta}})^{y_i} (\frac{1}{1+e^{x_i'\beta}})^{1-y_i},$$
+where $x_i$ is the value of covariates for i (including 1) and $\beta$ is the vector of the parameters. When there is only SBP, $x_i$ just includes 1 and SBP.
+
+**Find mle**
+
+```{r,results='asis'}
+sample.glm = glm(HD~.,data = sample.hd,family = "binomial")
+stargazer(sample.glm,header=FALSE, type=output_format,no.space = T)
+```
+
+The logit function: 
+$$logit = `r sample.glm$coefficients[1]` + `r sample.glm$coefficients[2]` \times SBP.$$
+
+$$P(HD=1|HBP) = \frac{e^{logit}}{1+e^{logit}}.$$
+
+The MLE is obtained by simply maximizing the likelihood function shown in (ii). As with the actual method employed, refer to IRLS method. 
+
+**Evaluate the prob**
+
+```{r}
+sample.pre = predict(sample.glm,hd.data[nrow(hd.data)],type = "response")
+```
+
+The predicted probability with only 5 samples: `r sample.pre`.
+
+### Identify important risk factors for `Heart.Disease`.
+
+```{r}
+fit1 = glm(HD~SBP,data = hd.data.clean,family = "binomial")
+```
+
+**Which var to add first? By z-value**
+
+```{r}
+fit1.sum.list = list()
+new.z = c()
+j = 1
+for (i in c(2,3,5,6,7,8)) {
+  data.sub = hd.data.clean[,c(1,4,i),with=F]
+  fit1.new = glm(HD~.,data = data.sub,family = "binomial")
+  fit1.sum.list[[j]] = summary(fit1.new)
+  new.z[j] = fit1.sum.list[[j]]$coefficients[3,3] # z-value of the new var
+  j = j + 1
+}
+best.fit = which.max(new.z) # should include sex by z
+
+fit2 = glm(HD~.,data = hd.data.clean[,c(1,3,4),with=F],family = "binomial")
+```
+
+We should include `SEX` as it has the largest z value.
+
+**Comparison of the residual deviance**
+
+Yes the residual deviance of fit2 is always smaller than that of fit1. Consider the maximization problem of two variables. If we let $\beta_2 = 0$, the problem is equivalent to the maximization in one variable. Thus, the optimization result in fit1 is actually suboptimal in fit2. Given that the deviance is proportional to negative log likelihood, the deviance in fit2 must be smaller.
+
+**Tests**
+
+```{r}
+waldtest(fit1,fit2) # note: use F-statistics here
+```
+
+```{r}
+lrtest(fit1,fit2) # same as Anova() in 'car' package
+```
+
+The added variable is both significant in two tests. The p-value in Wald test (F-statistics): $1.4 \times 10^{-10}$. In LR test: $3.8 \times 10^{-11}.$ They are not the same since they use different statistics.
+
+### Model building 
+
+**Backward selection**
+
+For a better manifestation, we hide the regression results here.
+
+```{r,results='hide'}
+j = 0
+data = hd.data.clean
+while (j<1) {
+  reg = glm(HD~.,data = data,family = "binomial")
+  sum.reg = summary(reg)
+  max.p.num = which.max(sum.reg$coefficients[-1,4])
+  max.p.name = names(max.p.num)
+  max.p.info = sum.reg$coefficients[max.p.num+1,]
+  if(max.p.info[4] > 0.05){
+    data = data[,-max.p.name,with=F]
+    print(paste0("Eliminate var: ",max.p.name," p-value: ",round(max.p.info[4],digits = 3)))
+  }else{
+    break
+  }
+}
+```
+
+We present our final model by backward selection next.
+
+```{r,results='asis'}
+fit.backward = reg
+stargazer(fit.backward,header=FALSE, type=output_format,no.space = T)
+```
+
+**Exhaustive search with AIC**
+
+The best model found by bestglm() is presented below:
+
+```{r,results='asis'}
+xy = data.table(hd.data.clean[,-1],hd.data.clean[,1])
+fit.exhaustive = bestglm(xy,family = binomial,method = "exhaustive",IC = "AIC",nvmax = 10)
+fit.exhau.best = fit.exhaustive$BestModel
+stargazer(fit.exhau.best,header=FALSE, type=output_format,no.space = T)
+```
+
+There is no guarantee that all the remaining p-values are smaller than 0.05. This final model is not the same as the model from backwards elimination, as all p-values in the previous one are smaller than 0.05.
+
+**Summary according to the exhaustive model**
+
+In the model found in (ii), six variables are included. They are important in the sense that the decrease they brought to the deviance is larger than the penalty for them (which is 2 in the case of AIC). 
+
+Age, Sexmale, SBP, CHOL, FRW, CIG are all positively correlated to the probability of heart diseases. 
+
+**Prediction**
+
+```{r}
+liz.prob = predict(fit.exhau.best,hd.data[nrow(hd.data)],type = "response")
+```
+
+The probability for Liz having heart diseases: `r liz.prob`.
+
+## Classification
+
+### ROC/FDR
+
+**ROC curve with fit1**
+
+```{r}
+roc.fit1 = roc(hd.data.clean$HD,fit1$fitted.values,plot=T,col="blue")
+```
+
+The ROC curve using fit1 is illustrated above. It reports the trade-off between specificity and sensitivity, i.e., the true negative rate and the true positive rate. We can find the best possible combinations of the two rates in this graph and decide which to choose.
+
+```{r}
+num = max(roc.fit1$sensitivities[roc.fit1$specificities>0.9])
+threshold = roc.fit1$thresholds[roc.fit1$sensitivities == num]
+```
+
+The threshold satisfying the condition: `r threshold`.
+
+**Two ROC curves**
+
+```{r}
+roc.fit2 = roc(hd.data.clean$HD,fit2$fitted.values)
+roc.data.fit1 = data.table(spec = roc.fit1$specificities,sens = roc.fit1$sensitivities,model = "fit1")
+roc.data.fit2 = data.table(spec = roc.fit2$specificities,sens = roc.fit2$sensitivities,model = "fit2")
+roc.data.combine = rbind(roc.data.fit1,roc.data.fit2)
+ggplot(roc.data.combine,aes(x=spec,y=sens,group=model,color=model))+
+  geom_line()+
+  xlab("True negative rates")+
+  ylab("True positive rates")+
+  labs(title = "ROC curves for two models")+
+  theme_bw()
+```
+
+In most of the time, the ROC curve for fit2 is higher than the ROC curve for fit1. Since fit2 always has a better in-sample predictive power than fit1, it's possible that it can achieve a higher sensitivity/specificity than fit1 when a minimum of the other statistics is stipulated. However, we can see that when the true negative rate is close to 1, fit2 actually falls below fit1. It is also reasonable because the in-sample predictive power is just higher than fit1 in aggregation instead of everywhere.
+
+**Estimation with threshold 0.5**
+
+The confusion matrix for fit1: 
+
+```{r}
+fit1.pred = ifelse(fit1$fitted.values>0.5,1,0)
+fit2.pred = ifelse(fit2$fitted.values>0.5,1,0)
+confusionMatrix(as.factor(fit1.pred),reference = hd.data.clean$HD,positive = "1")
+```
+
+The confusion matrix for fit2: 
+
+```{r}
+confusionMatrix(as.factor(fit2.pred),reference = hd.data.clean$HD,positive = "1")
+```
+
+We can see that the positive prediction value in fit2 is 0.4722 while that in fit1 is 0.4500. Thus we prefer fit2.
+
+**PPV and NPV**
+
+```{r}
+data.fit1 = data.table(thres = roc.fit1$thresholds,spec = roc.fit1$specificities,sens = roc.fit1$sensitivities,pos.num = length(which(hd.data.clean$HD == "1")),neg.num = nrow(hd.data.clean)-length(which(hd.data.clean$HD == "1")),model = "fit1")
+data.fit1[,":="(ppv = pos.num * sens/(pos.num*sens + neg.num*(1-spec)),
+                npv = neg.num * spec/(neg.num * spec + pos.num * (1-sens)))]
+fit1.use = data.fit1 %>%
+  pivot_longer(c(ppv,npv),names_to = "type")
+
+fit1.pv = ggplot(fit1.use,aes(x=thres,y=value,group=type,color=type))+
+  geom_line()+
+  xlab("Thresholds for p")+
+  ylab("PPV or NPV")+
+  scale_x_continuous(limits = c(0,1),breaks = seq(0,1,0.1))+
+  scale_y_continuous(limits = c(0,1),breaks = seq(0,1,0.1))+
+  labs(title = "PPV and NPV with different thresholds, fit1")+
+  theme_bw()
+
+```
+
+```{r}
+data.fit2 = data.table(thres = roc.fit2$thresholds,spec = roc.fit2$specificities,sens = roc.fit2$sensitivities,pos.num = length(which(hd.data.clean$HD == "1")),neg.num = nrow(hd.data.clean)-length(which(hd.data.clean$HD == "1")),model = "fit2")
+data.fit2[,":="(ppv = pos.num * sens/(pos.num*sens + neg.num*(1-spec)),
+                npv = neg.num * spec/(neg.num * spec + pos.num * (1-sens)))]
+fit2.use = data.fit2 %>%
+  pivot_longer(c(ppv,npv),names_to = "type")
+
+fit2.pv = ggplot(fit2.use,aes(x=thres,y=value,group=type,color=type))+
+  geom_line()+
+  xlab("Thresholds for p")+
+  ylab("PPV or NPV")+
+  scale_x_continuous(limits = c(0,1),breaks = seq(0,1,0.1))+
+  scale_y_continuous(limits = c(0,1),breaks = seq(0,1,0.1))+
+  labs(title = "PPV and NPV with different thresholds, fit2")+
+  theme_bw()
+
+plot_grid(fit1.pv,fit2.pv,nrow = 2)
+```
+
+Generally fit2 still performs better in terms of PPV and NPV. They are both generally higher than that for fit1. 
+
+### Bayes classification
+
+**Linear boundary**
+
+We classify i into $\hat{Y}=1$ if $\frac{P(Y_i=1|X_i)}{P(Y_i=0|X_i)}>\frac{a_{0,1}}{a_{1,0}}.$
+
+In our final model, the boundary: 
+$$\beta' X = -ln(10), where$$
+
+$\beta = [`r fit.exhau.best$coefficients`]'$, X is the included covariates (Age, Sexmale, SBP, CHOL, FRW, CIG) in addition to a constant 1. 
+
+**Estimated misclassification error**
+
+```{r}
+ratio1 = 1/10
+thres1 = ratio1/(1+ratio1)
+class1 = ifelse(fit.exhau.best$fitted.values>thres1,1,0)
+confu1 = confusionMatrix(as.factor(class1),reference = hd.data.clean$HD,positive = "1")
+mce1 = (confu1$table[1,2]*10+confu1$table[2,1])/nrow(hd.data.clean)
+```
+
+The estimated misclassification error here: `r mce1`. 
+
+**Classify Liz**
+
+```{r}
+Liz.class = liz.prob > thres1
+```
+
+Liz's class: `r as.character(as.integer(Liz.class))`. 
+
+**Performance of Bayesian classifier, ratio=10**
+
+```{r}
+roc.fit.final = roc(hd.data.clean$HD,fit.exhau.best$fitted.values)
+
+data.fit.final = data.table(thres = roc.fit.final$thresholds,spec = roc.fit.final$specificities,sens = roc.fit.final$sensitivities,pos.num = length(which(hd.data.clean$HD == "1")),neg.num = nrow(hd.data.clean)-length(which(hd.data.clean$HD == "1")),model = "fit.final")
+data.fit.final[,":="(a10 = pos.num*(1-sens),a01 = neg.num*(1-spec))]
+data.fit.final[,":="(mce1 = (10*a10+a01)/nrow(hd.data.clean),
+                     mce2 = (a10+a01)/nrow(hd.data.clean))]
+
+ggplot(data.fit.final,aes(x=thres,y=mce1))+
+  geom_line()+
+  geom_vline(color="red",xintercept = thres1)+
+  labs(title = "Threshold vs MCE, final model, ratio = 10")+
+  annotate("text",x=0.2,y=1.2,color="red",label="Bayes threshold")+
+  theme_bw()
+```
+
+**Performance of Bayesian classifier, ratio=1**
+
+```{r}
+ratio2 = 1
+thres2 = ratio2/(1+ratio2)
+class2 = ifelse(fit.exhau.best$fitted.values>thres2,1,0)
+confu2 = confusionMatrix(as.factor(class2),reference = hd.data.clean$HD,positive = "1")
+mce2 = (confu2$table[1,2]+confu1$table[2,1])/nrow(hd.data.clean)
+
+ggplot(data.fit.final,aes(x=thres,y=mce2))+
+  geom_line()+
+  geom_vline(color="red",xintercept = thres2)+
+  labs(title = "Threshold vs MCE, final model, ratio = 1")+
+  annotate("text",x=0.4,y=0.4,color="red",label="Bayes threshold")+
+  theme_bw()
+```
+
+From the graphs shown above we can see that Bayes rule does give us good thresholds in terms of minimizing weighted misclassification error.
