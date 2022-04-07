@@ -1,6 +1,10 @@
 ---
 title: "HW4"
-author: "Liming Ning"
+author:
+- Liming Ning
+- Hansen Wang
+- William Walsh
+- Kevin Sun
 date: "2022/3/18"
 geometry: margin=1in
 output:

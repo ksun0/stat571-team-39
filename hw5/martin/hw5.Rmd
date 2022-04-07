@@ -1,0 +1,471 @@
+---
+title: "HW5"
+author:
+- Liming Ning
+- Hansen Wang
+- William Walsh
+- Kevin Sun
+date: "2022/4/5"
+geometry: margin=1in
+output:
+  html_document:
+    code_folding: hide
+    highlight: haddock
+    number_sections: yes
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+urlcolor: blue
+always_allow_html: true
+indent: true 
+fontsize: 12pt
+---
+
+```{r setup, include=F, cache=FALSE}
+knitr::opts_chunk$set(echo = T, warning = F, message = F)
+knitr::opts_knit$set(root.dir = 'G:/github/stat571-team-39/hw5/martin')
+output_format <- ifelse(is.null(knitr::opts_knit$get("rmarkdown.pandoc.to")),
+                        "text", knitr::opts_knit$get("rmarkdown.pandoc.to"))
+options(scipen = 0, digits = 4)  # controls base R output
+if(!require('pacman')) {
+  install.packages('pacman')
+}
+pacman::p_load(data.table, reshape2, readxl, lubridate, tidyverse, pROC, cowplot,
+               kableExtra, RColorBrewer, lmtest, stargazer, bestglm, summarytools, glmnet, leaps,caret,jsonlite,tm,SnowballC,wordcloud,ranger,randomForest,elasticnet)
+Sys.setlocale(,"English")
+```
+
+# Yelp challenge
+
+## Processing
+
+## Data summary
+
+```{r}
+yelp = stream_in(file("data/yelp_review_20k.json"), verbose = F)
+yelp = yelp %>%
+  mutate(month = month(date),
+         weekday = wday(date,label = T))
+timespan = c(min(yelp$date),max(yelp$date))
+```
+
+The time period: `r timespan`.
+
+```{r}
+yelp.dt = data.table(yelp)
+month.sum = yelp.dt[order(month),.(
+  star1 = sum(stars == 1)/length(stars),
+  star2 = sum(stars == 2)/length(stars),
+  star3 = sum(stars == 3)/length(stars),
+  star4 = sum(stars == 4)/length(stars),
+  star5 = sum(stars == 5)/length(stars)
+),by = month]
+week.sum = yelp.dt[order(weekday),.(
+  star1 = sum(stars == 1)/length(stars),
+  star2 = sum(stars == 2)/length(stars),
+  star3 = sum(stars == 3)/length(stars),
+  star4 = sum(stars == 4)/length(stars),
+  star5 = sum(stars == 5)/length(stars)
+),by = weekday]
+
+kbl(month.sum,caption = 'Distribution of rating for every month', booktabs = T,linesep = "")%>%
+  kable_styling(latex_options = c("HOLD_position"))
+
+kbl(week.sum,caption = 'Distribution of rating for every day in a week', booktabs = T,linesep = "")%>%
+  kable_styling(latex_options = c("HOLD_position"))
+```
+
+If we define `high.rating` as rating above 3,
+
+```{r}
+month.sum[,high.rating := star4+star5]
+week.sum[,high.rating := star4+star5]
+
+ggplot(data = month.sum,aes(x=as.factor(month),weight=high.rating))+
+  geom_bar(color="black",fill = "DarkBlue",width = .7,position = 'dodge')+
+  theme_classic()+
+  ylab('prob')+
+  xlab("month")
+
+ggplot(data = week.sum,aes(x=weekday,weight=high.rating))+
+  geom_bar(color="black",fill = "DarkBlue",width = .7,position = 'dodge')+
+  theme_classic()+
+  ylab('prob')
+```
+
+The proportions may be significantly different across groups statistically due to the property of large sample, but they may not  be economically significant from each other, in terms of magnitude. Thus we think that month and week matter little in ratings.
+
+### dtm
+
+```{r,eval=F}
+yelp.text = yelp$text
+mycorpus1 <- VCorpus(VectorSource(yelp.text))
+
+mycorpus_clean <- tm_map(mycorpus1, content_transformer(tolower)) # to lower cases
+
+# Removes common English stopwords (e.g. "with", "i")
+mycorpus_clean <- tm_map(mycorpus_clean, removeWords, stopwords("english"))
+# inspect(mycorpus_clean[[7]])
+
+# punctuation
+mycorpus_clean <- tm_map(mycorpus_clean, removePunctuation)
+
+# Removes numbers
+mycorpus_clean <- tm_map(mycorpus_clean, removeNumbers)
+
+# Stem words
+mycorpus_clean <- tm_map(mycorpus_clean, stemDocument, lazy = TRUE) # words are changed
+
+```
+
+```{r,eval=F}
+save.image("corpus_clean.RData")
+```
+
+```{r}
+load("corpus_clean.RData")
+```
+
+**Full**
+
+```{r}
+dtm = DocumentTermMatrix(mycorpus_clean)
+inspect(dtm)
+
+# inspect(dtm[1,])
+```
+
+**Threshold: .5 percent**
+
+```{r}
+threshold <- .005*length(mycorpus_clean)   # 0.5% of the total documents 
+words.05per <- findFreqTerms(dtm, lowfreq=threshold)
+
+dtm.05per = DocumentTermMatrix(mycorpus_clean,control = list(dictionary = words.05per))
+inspect(dtm.05per)
+inspect(dtm.05per[100,405])
+```
+
+This matrix records the number every term appears in every doc. Cell in row 100 col 405: Doc100 with drink = 0. It means that the work "drink" does not appear in doc100. 
+
+Sparsity: 98\%. It means that 98\% of the elements in this matrix are zero.
+
+**Combination**
+
+```{r}
+data2 = data.table(high.rating = as.numeric(yelp$stars %in% c(4,5)),as.matrix(dtm.05per))
+```
+
+```{r}
+training.num = sample(1:nrow(data2),18000,replace = F)
+test.num = training.num[13001:18000]
+val.set = data2[-training.num]
+training.num = training.num[1:13000]
+train.set = data2[training.num]
+test.set = data2[test.num]
+```
+
+
+
+## Lasso
+
+```{r,eval=F}
+set.seed(1)
+x = model.matrix(high.rating~.,data = train.set)[,-1]
+
+y = train.set$high.rating
+fit1.cv = cv.glmnet(x,y,alpha = .99, family = "binomial") # lasso
+save(fit1.cv,file = "lasso_res.RData")
+```
+
+```{r}
+load("lasso_res.RData")
+plot(fit1.cv)
+
+coef.min = coef(fit1.cv,s="lambda.1se") # more parsimonious usually. If use min, maybe there is noise
+# coef(fit1.cv,s="lambda.1min")
+nonzero.coef = coef.min[which(coef.min!=0),]
+# plot(fit1.cv)
+nonzero.var = names(nonzero.coef)[-1]
+```
+
+### relaxed lasso
+
+```{r}
+nonzero.var[which(nonzero.var=="`next`")] = "next" # attention: a reserved word next
+
+train.subset = train.set[,c("high.rating",nonzero.var),with=F]
+```
+
+```{r,eval=F}
+reg.glm = glm(high.rating~.,data = train.subset,family = "binomial")
+
+save(reg.glm,file = "reg_glm.RData")
+```
+
+### Coef histogram for common glm
+
+```{r}
+load("reg_glm.RData")
+
+coef.glm = coef(reg.glm)[-1]
+hist(coef.glm)
+```
+
+### For positive words
+
+```{r}
+coef.glm.pos = coef.glm[which(coef.glm >= 0)]
+coef.glm.pos = sort(coef.glm.pos,decreasing = T)
+coef.glm.pos[1:2]
+```
+
+The top two positive words: "thorough" and "refresh". For "thorough", one more time its appearance in a comment is associated with, on average, an increase of 3.251 on the logit of probability of giving a high rating; for "refresh", one more time its appearance in a comment is associated with, on average, an increase of 2.416 on the logit of probability of giving a high rating. It essentially means that we can almost be sure the rating is high once we see these two words.
+
+```{r}
+cor.special <- brewer.pal(8,"Dark2")  # set up a pretty color scheme
+set.seed(1)
+wordcloud(names(coef.glm.pos)[1:100], coef.glm.pos[1:100],  # make a word cloud; what if freq>3? min.freq. Attention: the illustration is randomized if there are a lot of words!
+          colors=cor.special, ordered.colors=F,min.freq = 1.1)
+
+```
+
+### For negative words
+
+```{r}
+coef.glm.neg = coef.glm[which(coef.glm < 0)]
+coef.glm.neg = sort(coef.glm.neg,decreasing = F)
+coef.glm.neg[1:2]
+```
+
+The top two negative words: "unprofessional" and "horrible". For "unprofessional", one more time its appearance in a comment is associated with, on average, a decrease of 3.607 on the logit of probability of giving a high rating; for "horrible", one more time its appearance in a comment is associated with, on average, a decrease of 2.713 on the logit of probability of giving a high rating. It essentially means that we can almost be sure the rating is low once we see these two words.
+
+```{r}
+set.seed(1)
+wordcloud(names(coef.glm.neg)[1:100], -coef.glm.neg[1:100],  # make a word cloud; what if freq>3? min.freq. Attention: the illustration is randomized if there are a lot of words!
+          colors=cor.special, ordered.colors=F,min.freq = 1.1)
+```
+
+Conforming to our intuition, thorough, refresh, professional, delight, etc. are associated with high ratings, while unprofessional, horrible, disgusting, etc. are associated with low ratings.
+
+### Comparison
+
+```{r}
+predict.lasso = predict(fit1.cv,as.matrix(test.set[,-1]),type = "response",s="lambda.1se")
+class.lasso = predict(fit1.cv,as.matrix(test.set[,-1]),type = "class",s = "lambda.1se")
+predict.glm = predict(reg.glm,test.set,type = "response")
+class.glm = ifelse(predict.glm >= 0.5, "1","0")
+
+testerr.lasso = sum(class.lasso != test.set$high.rating)/nrow(test.set)
+testerr.glm = sum(class.glm != test.set$high.rating)/nrow(test.set)
+```
+
+Test error from lasso: `r testerr.lasso`. Test error from logistics regression: `r testerr.glm`. The two are quite close to each other, both are about 0.13. Logistics one is slightly smaller.
+
+## Random forest
+
+Just a method to make use of different classification trees, constructed with bootstrapping samples and reducing the calculation burden by only allowing for a random subset of variables when optimizing in each step, then bagging them together.
+
+```{r}
+set.seed(1)
+# take care of the reserved words
+break.num = which(colnames(train.set)=="break")
+colnames(train.set)[break.num] = colnames(val.set)[break.num] = colnames(test.set)[break.num] = "break."
+
+next.num = which(colnames(train.set)=="next")
+colnames(train.set)[next.num] = colnames(val.set)[next.num] = colnames(test.set)[next.num] = "next."
+colnames(train.subset)[which(colnames(train.subset)=="next")] = "next."
+
+repeat.num = which(colnames(train.set)=="repeat")
+colnames(train.set)[repeat.num] = colnames(val.set)[repeat.num] = colnames(test.set)[repeat.num] = "repeat."
+
+
+train.subset[,high.rating := as.factor(high.rating)]
+train.set$high.rating = as.factor(train.set$high.rating)
+```
+
+### tune ntree
+
+```{r,eval=F}
+# make use of the lasso result; do dim reduction
+
+rf.fit1 = randomForest(high.rating~.,data = train.subset) # mtry = sqrt(length(col)), ntree = 500
+save(rf.fit1,file = "rf.fit1.RData")
+```
+
+```{r}
+load("rf.fit1.RData")
+plot(rf.fit1)
+```
+
+We choose to take ntree = 150.
+
+### tune mtry
+
+```{r,eval=F}
+max.i = 30
+ntree = 150
+oob.error = c()
+fit.list = list()
+for (i in 1:max.i){
+  fit.list[[i]] = randomForest(high.rating~.,data = train.subset, mtry = i,ntree = ntree)
+  oob.error[i] = fit.list[[i]]$err.rate[ntree,1]
+}
+save(fit.list,oob.error,file = "fit.rf.list.RData")
+```
+
+```{r}
+load("fit.rf.list.RData")
+
+ggplot()+
+  geom_line(aes(x=1:30,y=oob.error))+
+  xlab("mtry")+
+  labs(title = "Testing error with ntree=150")+
+  theme_bw()
+
+```
+
+We choose to take mtry = 10.
+
+### final model
+
+```{r}
+mtry = 10
+fit.final.rf = fit.list[[mtry]]
+predict.rf = predict(fit.final.rf,test.set)
+predict.rf.prob = predict(fit.final.rf,test.set,type = "prob")
+testerr.rf = sum(predict.rf != test.set$high.rating)/nrow(test.set)
+```
+
+Test error: `r testerr.rf`.
+
+## PCA
+
+```{r,eval=F}
+pca.train = prcomp(train.set[,-1],center = T)
+save(pca.train,file = "pca.RData")
+```
+
+```{r}
+load("pca.RData")
+pve.train = data.table(t(summary(pca.train)$importance))
+pve.train[,PC := 1:1461]
+ggplot(data = pve.train,aes(x=PC,y=`Cumulative Proportion`))+
+  geom_point()+
+  geom_line()+
+  ylab("cum. prop.")+
+  theme_bw()
+
+ggplot(data = pve.train[1:50],aes(x=PC,y=`Standard deviation`))+
+  geom_point()+
+  geom_line()+
+  ylab("cum. prop.")+
+  theme_bw()
+
+```
+
+Just take first 40 PCs.
+
+A caveat: PCA with original data may not be so useful, as there may be some words varying a lot but uncorrelated to the ratings. CCA may be more appropriate here.
+
+```{r}
+train.score = as.matrix(train.set[,-1]) %*% pca.train$rotation[,1:40]
+```
+
+```{r,eval=F}
+fit1.rf.pc = randomForest(train.set$high.rating~.,data = data.frame(train.score))
+save(fit1.rf.pc,file = "fit1.pc.rf.rdata")
+```
+
+```{r}
+load("fit1.pc.rf.rdata")
+plot(fit1.rf.pc)
+```
+
+Take ntree = 200.
+
+```{r,eval=F}
+oob.pc.error = c()
+fit.pc.list = list()
+for (i in 1:20){
+  fit.pc.list[[i]] = randomForest(train.set$high.rating~.,data = data.frame(train.score), mtry = i,ntree = 200)
+  oob.pc.error[i] = fit.pc.list[[i]]$err.rate[200,1]
+}
+save(oob.pc.error,fit.pc.list,file = "pc.rf.rdata")
+```
+
+```{r}
+load("pc.rf.rdata")
+ggplot()+
+  geom_line(aes(x=1:20,y=oob.pc.error))+
+  xlab("mtry")+
+  labs(title = "Testing error with ntree=250, after PCA")+
+  theme_bw()
+```
+
+Take mtry = 11.
+
+```{r}
+fit.pc.final.rf = fit.pc.list[[11]]
+test.score = as.matrix(test.set[,-1]) %*% pca.train$rotation[,1:40]
+predict.pc.rf = predict(fit.pc.final.rf,test.score)
+predict.pc.rf.prob = predict(fit.pc.final.rf,test.score,type = "prob")
+testerr.pc.rf = sum(predict.pc.rf != test.set$high.rating)/nrow(test.set)
+```
+
+Test error: `r testerr.pc.rf`. It is worse than random forest with all vars, as there are information loss and the problem of overfitting is largely resolved by cross validation.
+
+
+
+```{r,eval=F}
+# Sparse PCA
+spca.train = spca(train.set[,-1],K=50,type = "predictor", sparse = "varnum", para = rep(5,50))
+save(spca.train,file = "spca.rdata")
+
+load("spca.rdata")
+pve.train = data.table(t(summary(pca.train)$importance))
+pve.train[,PC := 1:1461]
+ggplot(data = pve.train,aes(x=PC,y=`Cumulative Proportion`))+
+  geom_point()+
+  geom_line()+
+  ylab("cum. prop.")+
+  theme_bw()
+
+ggplot(data = pve.train[1:50],aes(x=PC,y=`Standard deviation`))+
+  geom_point()+
+  geom_line()+
+  ylab("cum. prop.")+
+  theme_bw()
+```
+
+## Ensemble
+
+Test errors: 
+
+```{r}
+predict.mixed1.prob = (predict.glm+predict.lasso[,1]+predict.pc.rf.prob)/3
+predict.mixed1 = ifelse(predict.mixed1.prob>=0.5,"1","0")
+testerr.mixed1 = sum(predict.mixed1!=test.set$high.rating)/nrow(test.set)
+
+predict.mixed2.prob = (predict.glm+predict.lasso[,1]+predict.pc.rf.prob+predict.pc.rf.prob)/4
+predict.mixed2 = ifelse(predict.mixed2.prob>=0.5,"1","0")
+testerr.mixed2 = sum(predict.mixed2!=test.set$high.rating)/nrow(test.set)
+
+testerr.comb = c(testerr.glm,testerr.lasso,testerr.rf,testerr.pc.rf,testerr.mixed1)
+names(testerr.comb) = c("lasso logistics","lasso","random forest","pca random forest","mixed")
+testerr.comb
+```
+
+We can find that random forest works the best (but does not seem stable). It is not very surprising
+
+## Final
+
+```{r}
+class.val = predict(fit.final.rf,val.set[,-1],type = "class")
+
+valerr = sum(class.val != val.set$high.rating)/nrow(val.set)
+```
+
+Validation error: `r valerr`. Almost the same as the test error. 
+
+If a review is given, first, extract the words in the review and get its tm output, then predict it with the final model.

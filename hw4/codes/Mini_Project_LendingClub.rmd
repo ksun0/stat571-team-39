@@ -1,0 +1,215 @@
+---
+title: "Credit Risk via Lending Club"
+author: " Modern Data Mining Group 39"
+date: "2022/3/20"
+geometry: margin=1in
+output:
+  html_document:
+    code_folding: hide
+    highlight: haddock
+    number_sections: yes
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+urlcolor: blue
+always_allow_html: true
+indent: true 
+fontsize: 12pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = F,message = F, fig.width = 7, fig.height = 4)
+if(!require("pacman")) install.packages("pacman")
+output_format <- ifelse(is.null(knitr::opts_knit$get("rmarkdown.pandoc.to")),
+                        "text", knitr::opts_knit$get("rmarkdown.pandoc.to"))
+options(scipen = 0, digits = 4)  # controls base R output
+pacman::p_load(tidyverse, glmnet, car, data.table,summarytools,rpart.plot,r.part,lubridate,bestglm,pROC,caret,randomForest,stargazer)   #add your packages here
+knitr::opts_knit$set(root.dir = 'G:/github/stat571-team-39/hw4/LendingClubCase')
+```
+
+
+
+# EDA
+
+```{r}
+lending_data <- fread("LoanStats_07_11_Clean.csv")
+lending.data.pre = lending_data[,-c("issue_d","funded_amnt","funded_amnt_inv","total_pymnt","total_pymnt_inv","total_rec_prncp","total_rec_int","total_rec_late_fee","recoveries","collection_recovery_fee","last_pymnt_d","last_pymnt_amnt","last_credit_pull_d")]
+possible.factor = c("loan_amnt","term","int_rate","grade","home_ownership","annual_inc","dti","verification_status","delinq_2yrs","total_acc","pub_rec","revol_bal","pub_rec_bankruptcies")
+```
+
+## default vs. grades
+
+As shown in the barplot below, the percentage of fully-paid loans decreases steadily from Grade A to Grade G. Approximately 6% of Grade A loans defaulted whereas 31% of Grade G loans defaulted. 
+
+```{r}
+lending.sum = lending_data[order(grade),.(
+  fully.paid.prop = length(which(loan_status == "Fully Paid"))/length(loan_status)
+),by=grade]
+
+ggplot(data = lending.sum,aes(x=grade,weight=fully.paid.prop))+
+  geom_bar(fill = "Darkblue")+
+  ylab("prop of fully paid loans")+
+  theme_bw()
+```
+
+## default vs. annual income
+
+For simplicity we start with a simple question: How does loan status relate to the annual income of the individual?
+
+```{r}
+income = lending_data %>% group_by(loan_status) %>% summarise(mean(annual_inc))
+```
+
+We observe that defaulted loans were held by people with an average income of 62,638, while non-defaulted loans were held by people with an average income of 70,082. Therefore we can see that defaults are negatively correlated with low income.
+
+## default vs. delinquencies in the past two years
+
+```{r}
+ggplot(data = lending_data,aes(x=delinq_2yrs,y=loan_status))+
+  geom_point(position = "jitter")+
+  theme_bw()
+```
+
+We try to explore the relationship between the loan status and delinquencies in the past two years. The plot seems to be counter-intuitive: past defaults do not seem to predict current defaults.
+
+## default vs. interest rate
+
+```{r}
+ggplot(data = lending_data,aes(x=int_rate,y=loan_status))+
+  geom_point(position = "jitter")+
+  theme_bw()
+income = lending_data %>% group_by(loan_status) %>% summarise(mean(int_rate))
+```
+
+It is surprising that the relationship between interest rates and defaults is not as clear as what is predicted in theory: defaulted loans do not seem to have a significantly higher interest rate. Calculation reveals that the mean interest rate for the default group is 0.139 while that for the non-default group is 0.117. This difference is much smaller than the within-group difference, indicating that there are more risk factors to identify. Next we will go directly into multiple logistic regression and build a model.
+
+# Multiple Logistic Regression and Classification
+
+We first manually identify 13 covariates which have a big possibility to be correlated with defaults. We will only include these variables into our model for a better interpretation. 
+
+Before building the model, we first put aside 9,000 observations as the testing set. We will build our model with the rest of the observations and select the best one by comparing the real testing error.
+
+```{r}
+set.seed(1)
+lending.data.pre[,loan_status := as.numeric(loan_status == "Charged Off")]
+lending.data.pre[,term := substr(term,1,2)]
+test.num = sample(1:nrow(lending.data.pre),9000,replace = F)
+data.test = lending.data.pre[test.num]
+data.train = lending.data.pre[-test.num]
+```
+
+```{r}
+data = select(data.train,all_of(c(possible.factor,"loan_status")))
+```
+
+```{r}
+model = glm(loan_status~.,data = data)
+# Anova(model)
+
+data[,":="(verification_status = NULL,delinq_2yrs = NULL,total_acc = NULL,revol_bal = NULL)]
+
+model1 = glm(loan_status~.,data = data)
+# Anova(model1)
+
+data[,":="(pub_rec_bankruptcies= NULL,home_ownership = NULL)]
+model2 = glm(loan_status~.,data = data)
+# Anova(model2)
+
+data[,":="(grade = NULL)]
+model3 = glm(loan_status~.,data = data)
+# Anova(model3)
+```
+
+We first fit the full model and then conduct backward selection. We proceed until all variables are significant at 10\% in the regression. The result of our final model from multiple logistic regression is presented below (for manifestation we omit the coefficients of states): 
+
+```{r,results='asis'}
+stargazer(model3,header=FALSE, type=output_format,no.space = T,omit = "addr_state")
+```
+
+
+```{r}
+roc.fit1 = roc(data.train$loan_status,model3$fitted.values,plot=T,col="blue")
+```
+
+The ROC curve of our model is presented below. The value of the AUC is `r roc.fit1$auc`.
+
+## Classification
+
+```{r}
+ratio1 = 1/2
+thres1 = ratio1/(1+ratio1)
+class1 = ifelse(model3$fitted.values>thres1,1,0)
+confu1 = confusionMatrix(as.factor(class1),reference = as.factor(data$loan_status),positive = "1")
+mce1 = (confu1$table[1,2]*2+confu1$table[2,1])/nrow(data)
+```
+
+By setting the loss ratio to 1/2, the misclassification error we get from the training data: `r mce1`. The threshold for the logit we choose: `r thres1`.
+
+## Check the testing error
+
+```{r}
+test.prob = predict(model3,data.test,type = "response")
+class.test = ifelse(test.prob>thres1,1,0)
+confu.test = confusionMatrix(as.factor(class.test),reference = as.factor(data.test$loan_status),positive = "1")
+mce.test = (confu.test$table[1,2]*2+confu.test$table[2,1])/nrow(data.test)
+```
+
+The mce of the training set and the test set is similar, indicating that our model is not overfitted.
+
+Let's interprete our model results. `loan amount`, `annual income` are negatively correlated with defaults, while term length, interest rate, dti and derogatory public records are positively correalted with defaults. It indicates that we should value more on the former covariates and consider more about the latter covariates when making investments.
+
+# Decision Tree
+
+```{r}
+tree_data <- lending_data %>% select(c(loan_status, dti, delinq_2yrs,  inq_last_6mths, revol_util, revol_bal, open_acc, pub_rec, total_acc, pub_rec_bankruptcies))
+tree_data$loan_status <- as.factor(tree_data$loan_status)
+```
+
+Create a function that splits data into train and test sets
+
+```{r}
+create_train_test <- function(data, size = 0.8, train = TRUE) {
+    n_row = nrow(data)
+    total_row = size * n_row
+    train_sample <- 1: total_row
+    if (train == TRUE) {
+        return (data[train_sample, ])
+    } else {
+        return (data[-train_sample, ])
+    }
+}
+```
+
+Split the Data into train/test set
+```{r}
+data_train <- create_train_test(tree_data, 0.8, train = TRUE)
+data_test <- create_train_test(tree_data, 0.8, train = FALSE)
+dim(data_train)
+```
+Verify that the randomization process is correct
+```{r}
+prop.table(table(data_train$loan_status))
+prop.table(table(data_test$loan_status))
+```
+
+```{r}
+fit_tree <- rpart(loan_status~., data = data_train, method = "class", minsplit = 2, maxdepth=8)
+rpart.plot(fit_tree)
+```
+
+
+# Random forest
+
+```{r,eval=F}
+model_rf = randomForest::randomForest(loan_status~., data_train, method = "class", mtry = 5)
+model_rf
+table(predict(model_rf,data_test,type = "response") > (1/2.2)/(1+(1/2.2)),
+    data_test$loan_status)
+rf_ROC = pROC::roc(as.integer(data_test$loan_status), predict(model_rf,newdata = data_test,type = "response"))
+print(pROC::auc(rf_ROC))
+```
+
+```{r,eval=F}
+tree_ROC = pROC::roc(as.integer(data_test$loan_status), predict(model_tree,newdata = data_test,type = "prob")[,2] )
+print(pROC::auc(tree_ROC))
+```
