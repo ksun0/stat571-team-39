@@ -1,0 +1,193 @@
+---
+title: "Credit Risk via Lending Club"
+author: " Modern Data Mining Group 39"
+date: "2022/3/20"
+geometry: margin=1in
+output:
+  html_document:
+    code_folding: hide
+    highlight: haddock
+    number_sections: yes
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+urlcolor: blue
+always_allow_html: true
+indent: true 
+fontsize: 12pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width = 7, fig.height = 4)
+if(!require("pacman")) install.packages("pacman")
+pacman::p_load(tidyverse, glmnet, car, data.table,summarytools,rpart.plot,r.part)   #add your packages here
+knitr::opts_knit$set(root.dir = '/Users/ksun/Downloads/stat571/stat571-team-39/hw4')
+```
+
+
+
+# EDA
+
+```{r}
+lending_data <- fread("LendingClubCase/LoanStats_07_11_Clean.csv")
+lending.data.pre = lending_data[,-c("issue_d","funded_amnt","funded_amnt_inv","total_pymnt","total_pymnt_inv","total_rec_prncp","total_rec_int","total_rec_late_fee","recoveries","collection_recovery_fee","last_pymnt_d","last_pymnt_amnt","last_credit_pull_d")]
+possible.factor = c("loan_amnt","int_rate","grade","home_ownership","annual_inc","addr_state","dti","verification_status","delinq_2yrs","total_acc","pub_rec","revol_bal","pub_rec_bankruptcies")
+```
+
+## default vs. grades
+
+As shown in the barplot below, the percentage of fully-paid loans decreases steadily from Grade A to Grade G. Approximately 6% of Grade A loans defaulted whereas 31% of Grade G loans defaulted. 
+
+```{r}
+lending.sum = lending_data[order(grade),.(
+  fully.paid.prop = length(which(loan_status == "Fully Paid"))/length(loan_status)
+),by=grade]
+
+ggplot(data = lending.sum,aes(x=grade,weight=fully.paid.prop))+
+  geom_bar(fill = "Darkblue")+
+  ylab("prop of fully paid loans")+
+  theme_bw()
+```
+
+## default vs. annual income
+
+For simplicity we start with a simple question: How does loan status relate to the annual income of the individual?
+
+```{r}
+income = lending_data %>% group_by(loan_status) %>% summarise(mean(annual_inc))
+```
+
+We observe that defaulted loans were held by people with an average income of 62,638, while non-defaulted loans were held by people with an average income of 70,082. Therefore we can see that defaults are negatively correlated with low income.
+
+## default vs. interest rate
+
+```{r}
+ggplot(data = lending_data,aes(x=int_rate,y=loan_status))+
+  geom_point(position = "jitter")+
+  theme_bw()
+```
+
+
+
+
+
+# Multiple Logistic Regression and Classification
+
+# Decision Tree
+
+```{r}
+tree_data <- lending_data %>% select(c(loan_status, dti, delinq_2yrs,  inq_last_6mths, revol_util, revol_bal, open_acc, pub_rec, total_acc, pub_rec_bankruptcies))
+# tree_data$loan_status <- as.factor(tree_data$loan_status)
+tree_data$loan_status = tree_data$loan_status != "Fully Paid"
+```
+
+Create a function that splits data into train and test sets
+
+```{r}
+create_train_test <- function(data, size = 0.8, train = TRUE) {
+    n_row = nrow(data)
+    total_row = size * n_row
+    train_sample <- 1: total_row
+    if (train == TRUE) {
+        return (data[train_sample, ])
+    } else {
+        return (data[-train_sample, ])
+    }
+}
+```
+
+Split the Data into train/test set
+```{r}
+data_train <- create_train_test(tree_data, 0.8, train = TRUE)
+data_test <- create_train_test(tree_data, 0.8, train = FALSE)
+dim(data_train)
+```
+Verify that the randomization process is correct
+```{r}
+prop.table(table(data_train$loan_status))
+prop.table(table(data_test$loan_status))
+```
+```{r}
+MCE = function(prediction,actual){
+  False_negative = sum(prediction[actual == TRUE] != TRUE)
+  False_positive = sum(prediction[actual != TRUE] == TRUE)
+  return((False_negative*2.2 + False_positive)/length(actual))
+}
+```
+
+
+```{r}
+#Baseline Model predicting all as would not default
+MCE(rep(FALSE,nrow(tree_data)), tree_data$loan_status)
+```
+```{r}
+mod1 = glm(data = data_train,loan_status~.,family = "binomial")
+```
+```{r}
+summary(mod1)
+```
+
+```{r}
+#Confusion Matrix
+table(predict(mod1,data_test,type = "response") > (1/2.2)/(1+(1/2.2)),
+    data_test$loan_status)
+```
+
+```{r}
+#Calculate MCE
+MCE(predict(mod1,data_test,type = "response") > (1/2.2)/(1+(1/2.2)),
+    data_test$loan_status)
+```
+
+```{r}
+mod0_ROC = pROC::roc(as.integer(data_test$loan_status), predict(mod1,data_test,type = "response"))
+pROC::auc(mod0_ROC)
+```
+
+```{r}
+model_tree <- rpart(loan_status~., data = data_train, method = "class", cp=0.00096)
+rpart.plot(model_tree)
+```
+
+
+```{r}
+tree_ROC = pROC::roc(as.integer(data_test$loan_status), predict(model_tree,newdata = data_test,type = "prob")[,2] )
+print(pROC::auc(tree_ROC))
+```
+```{r}
+library(randomForest)
+```
+```{r}
+model_rf = randomForest::randomForest(loan_status~., data_train, method = "class", mtry = 5)
+```
+```{r}
+model_rf
+```
+```{r}
+table(predict(model_rf,data_test,type = "response") > (1/2.2)/(1+(1/2.2)),
+    data_test$loan_status)
+```
+```{r}
+rf_ROC = pROC::roc(as.integer(data_test$loan_status), predict(model_rf,newdata = data_test,type = "response"))
+print(pROC::auc(rf_ROC))
+```
+
+ii) Analyses
+
+* Various appropriate statistical methods: e.g. glmnet (and/or trees, ignore this at the moment)
+* Comparisons various models
+* Final model(s)
+
+iii) Conclusion
+
+* Summarize results and the final model
+* Caveats
+* Final recommendations
+
+Maintain a good descriptive flow in the text of your report. Use Appendices to display lengthy output. 
+
+iii) Appendix
+	
+* All your R code (code without comments is no good!) if you are not using `rmd` format.
+* Any thing necessary to keep but for which you don’t want them to be in the main report.
+

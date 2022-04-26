@@ -1,0 +1,476 @@
+---
+title: "COVID19 Case Study Solution"
+output:
+  html_document:
+    code_folding: show
+    highlight: haddock
+    theme: lumen
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+    number_sections: yes
+  pdf_document:
+    toc_depth: '4'
+    number_sections: yes
+urlcolor: blue
+---
+
+```{r Setup, include=FALSE, results='hide', warning=FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.width=8, fig.height=4)
+options(scipen = 0, digits = 3)  # controls base R output
+
+# Package setup
+if(!require("pacman")) install.packages("pacman")
+
+pacman::p_load(tidyverse, dplyr, ggplot2, ggthemes, data.table, lubridate,
+               GGally, RColorBrewer, ggsci, plotROC, usmap,
+               plotly, ggpubr, vistime, magrittr, glmnet, leaps)
+```
+
+
+# Background
+
+The outbreak of the novel Corona virus disease 2019 (COVID-19) [was declared a public health emergency of international concern by the World Health Organization (WHO) on January 30, 2020](https://www.who.int/dg/speeches/detail/who-director-general-s-statement-on-ihr-emergency-committee-on-novel-coronavirus-(2019-ncov)). Upwards of [112 million cases have been confirmed worldwide, with nearly 2.5 million associated deaths](https://covid19.who.int/). Within the US alone, there have been [over 500,000 deaths and upwards of 28 million cases reported](https://covid.cdc.gov/covid-data-tracker/#trends_dailytrendscases). Governments around the world have implemented and suggested a number of policies to lessen the spread of the pandemic, including mask-wearing requirements, travel restrictions, business and school closures, and even stay-at-home orders. The global pandemic has impacted the lives of individuals in countless ways, and though many countries have begun vaccinating individuals, the long-term impact of the virus remains unclear.
+
+The impact of COVID-19 on a given segment of the population appears to vary drastically based on the socioeconomic characteristics of the segment. In particular, differing rates of infection and fatalities have been reported among different [racial groups](https://www.cdc.gov/coronavirus/2019-ncov/covid-data/investigations-discovery/hospitalization-death-by-race-ethnicity.html), [age groups](https://www.cdc.gov/coronavirus/2019-ncov/covid-data/investigations-discovery/hospitalization-death-by-age.html), and [socioeconomic groups](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7221360/). One of the most important metrics for determining the impact of the pandemic is the death rate, which is the proportion of people within the total population that die due to the the disease. 
+
+We assemble this dataset for our research with the goal to investigate the effectiveness of lockdown on flattening the COVID curve. We provide a portion of the cleaned dataset for this case study. 
+
+There are two main goals for this case study. 
+
+1. We show the dynamic evolvement of COVID cases and COVID-related death at state level.
+2. We try to figure out what county-level demographic and policy interventions are associated with mortality rate in the US. We try to construct models to find possible factors related to county-level COVID-19 mortality rates.
+
+Remark: please keep track with the most updated version of this write-up.
+
+
+# Data Summary
+
+The data comes from several different sources: 
+
+1. [County-level infection and fatality data](https://github.com/nytimes/covid-19-data) - This dataset gives daily cumulative numbers on infection and fatality for each county. 
+    * [NYC data](https://github.com/nychealth/coronavirus-data)
+2. [County-level socioeconomic data](https://www.ers.usda.gov/data-products/atlas-of-rural-and-small-town-america/download-the-data/) - The following are the four relevant datasets from this site.   
+    i. Income - Poverty level and household income. 
+    ii. Jobs - Employment type, rate, and change.
+    iii. People - Population size, density, education level, race, age, household size, and migration rates.
+    iv. County Classifications - Type of county (rural or urban on a rural-urban continuum scale).
+3. [Intervention Policy Data](https://github.com/JieYingWu/COVID-19_US_County-level_Summaries/blob/master/data/interventions.csv) - This dataset is a manually compiled list of the dates that interventions/lockdown policies were implemented and lifted at the county level. 
+
+# EDA
+
+In this case study, we use the following three cleaned data:
+
+* **covid_county.csv**: County-level socialeconomic information that combines the above-mentioned 4 datasets: Income (Poverty level and household income), Jobs (Employment type, rate, and change), People (Population size, density, education level, race, age, household size, and migration rates), County Classifications
+* **covid_rates.csv**: Daily cumulative numbers on infection and fatality for each county
+* **covid_intervention.csv**: County-level lockdown intervention.
+
+Among all data, the unique identifier of county is `FIPS`.
+
+The cleaning procedure is attached in `Appendix 2: Data cleaning` You may go through it if you are interested or would like to make any changes. 
+
+First read in the data.
+
+```{r}
+# county-level socialeconomic information
+county_data <- fread("data/covid_county.csv") 
+# county-level COVID case and death
+covid_rate <- fread("data/covid_rates.csv")
+# county-level lockdown dates 
+# covid_intervention <- fread("data/covid_intervention.csv")
+```
+
+## Understand the data
+
+The detailed description of variables is in `Appendix 1: Data description`. Please get familiar with the variables. Summarize the two data briefly.
+
+## COVID case trend
+
+It is crucial to decide the right granularity for visualization and analysis. We will compare daily vs weekly total new cases by state and we will see it is hard to interpret daily report.
+
+i) Plot **new** COVID cases in NY, WA and FL by state and by day. Any irregular pattern? What is the biggest problem of using single day data? 
+
+ii) Create **weekly new** cases per 100k `weekly_case_per100k`. Plot the spaghetti plots of `weekly_case_per100k` by state. Use `TotalPopEst2019` as population.
+
+iii) Summarize the COVID case trend among states based on the plot in ii). What could be the possible reasons to explain the variabilities? 
+
+iv) (Optional) Use `covid_intervention` to see whether the effectiveness of lockdown in flattening the curve.
+
+```{r}
+# get cumulative daily cases by state
+## we get summary statistics using group_by() and summarize()
+## See Advanced R tutorial Section 2.8
+covid_daily <- covid_rate %>%
+  group_by(date, State) %>%
+  summarize(daily_case = sum(cum_cases))
+
+# get daily new cases by state
+## again we use group by to get the lag cumulative cases using lag()
+## then we can get daily new cases by substracting the laggeg cases
+## See HW1 4.1.ii
+covid_daily <- covid_daily %>% 
+  group_by(State) %>%
+  arrange(date) %>%
+  mutate(lag_case = lag(daily_case, default = 0)) %>%
+  mutate(new_case = daily_case - lag_case)
+
+# get state population 
+## we only have county-level population 
+## so we need to calculate the state population
+## Again we use group_by() and summarize()
+pop_state <- covid_rate %>% 
+  distinct(FIPS, State, TotalPopEst2019) %>%
+  group_by(State) %>%
+  summarize(population = sum(TotalPopEst2019, na.rm = T))
+
+
+# Join the two tables
+## it is extremely common to merge to data by a unique ID using join functions
+## here our unique ID is State
+## we use left_join() to join the two tables
+## See Advanced R tutorial Section 2.9
+covid_daily <- left_join(covid_daily,
+                         pop_state,
+                         by = "State")
+
+# plot it
+## we first calculate the new cases per 100k 
+## for plotting, we set x as date, y as the new cases per 100k
+## use different colors for states and group states as one curve
+## use geom_line() becasue we want a curve
+## use theme(legend.position = "none") to hide the state legends
+sel_states <- c("New York", "Florida", "Washington")
+covid_daily %>%
+  filter(State %in% sel_states) %>%
+  ggplot(aes(x = date, 
+             y = new_case, col = State, group = State)) +
+  geom_line() +
+  theme_bw() +
+  theme(legend.position = "bottom") 
+
+```
+
+
+```{r}
+# get daily new cases by county
+daily <- covid_rate %>%
+  group_by(FIPS) %>%
+  arrange(date) %>%
+  mutate(daily_new_case = cum_cases - lag(cum_cases, default = 0))
+
+# get daily new cases by state and week
+covid_rate_week <- daily %>%
+  group_by(State, week) %>%
+  summarise(week_case = sum(daily_new_case, na.rm = T))
+
+# get state population
+pop_state <- covid_rate %>% 
+  distinct(FIPS, State, TotalPopEst2019) %>%
+  group_by(State) %>%
+  summarize(population = sum(TotalPopEst2019, na.rm = T))
+
+# join weekly state case with popultion 
+covid_rate_week <- merge(covid_rate_week,
+                         pop_state,
+                         by = "State")
+
+# sel_states <- c("New York", "Florida", "Washington")
+covid_rate_week %>%
+  # filter(State %in% sel_states) %>%
+  ggplot(aes(x=week, y = week_case/population*1e5, col = State, group = State)) +
+  geom_line() +
+  ylab("New cases per 100k") +
+  theme_bw() +
+  theme(legend.position = "none") 
+```
+
+
+
+i) For each month in 2020, plot the monthly deaths per 100k heatmap by state on US map. Use the same color range across months. (Hints: Set `limits` argument in `scale_fill_gradient()` or use `facet_wrap()`; use `lubridate::month()` and `lubridate::year()` to extract month and year from date; use `tidyr::complete(state, month, fill = list(new_case_per100k = NA))` to complete the missing months with no cases.)
+
+```{r}
+# get daily new death
+daily_death <- covid_rate %>%
+  group_by(FIPS) %>%
+  arrange(date) %>%
+  mutate(daily_new_death = cum_deaths - lag(cum_deaths, default = 0))
+
+# get monthly new death by state
+covid_monthly <- daily_death %>%
+  mutate(month = month(date), 
+         year = year(date)) %>%
+  filter(year == 2020) %>%
+  group_by(month, State) %>%
+  summarize(daily_death = sum(daily_new_death))
+
+# get state population
+pop_state <- covid_rate %>% 
+  distinct(FIPS, State, TotalPopEst2019) %>%
+  group_by(State) %>%
+  summarize(population = sum(TotalPopEst2019, na.rm = T))
+
+# join state monthly death with state population
+covid_monthly <- merge(covid_monthly,
+                       pop_state,
+                       by = "State")
+
+
+# get monthly new_death_per100k by state
+covid_monthly %<>% 
+  mutate(new_death_per100k = daily_death / population * 1e5)
+
+# change State to state so that usmap recognizes
+covid_monthly <- covid_monthly %>% rename(state = State)
+
+# there is no cases for some states in the first months
+# so there is no data
+# we complete the missing months with NA
+tmp <- covid_monthly %>%
+  complete(state, month, fill = list(new_death_per100k = NA))
+
+# plot
+plot_usmap(
+  data = tmp, 
+  regions = "state", 
+  values = "new_death_per100k", 
+  exclude = c("Hawaii", "Alaska"), 
+  color = "black") + 
+  scale_fill_continuous(
+    low = "white", high = "blue", 
+    name = "Deaths per 100k", label = scales::comma) + 
+  labs(title = "State Fatality Rate", 
+       subtitle = "Continental US States") +
+  theme(legend.position = "right") +
+  facet_wrap(~ month)
+```
+
+ii) (Optional) Use `plotly` to animate the monthly maps in i). Does it reveal any systematic way to capture the dynamic changes among states? (Hints: Follow *Appendix 3: Plotly heatmap::* in Module 6 regularization lecture to plot the heatmap using `plotly`. Use `frame` argument in `add_trace()` for animation. `plotly` only recognizes abbreviation of state names. Use `unique(us_map(regions = "states") %>% select(abbr, full))` to get the abbreviation and merge with the data to get state abbreviation.)
+
+```{r}
+# use plotly to animate 
+
+# specify some map projection/options
+g <- list(
+  scope = 'usa',
+  projection = list(type = 'albers usa'),
+  showlakes = TRUE,
+  lakecolor = toRGB('white')
+)  
+
+min_new_deathper100k <- 0
+max_new_death_per100k <- max(covid_monthly$new_death_per100k, na.rm = T)
+
+# get the abbr state name from us_map()
+state_abbr <- unique(us_map(regions = "states") %>% select(abbr, full))
+tmp <- merge(covid_monthly, 
+             state_abbr,
+             by.x = "state",
+             by.y = "full")
+
+# plot
+fig <- plot_geo(tmp, 
+                locationmode = 'USA-states')
+fig <- fig %>% add_trace(
+  z = ~new_death_per100k, locations = ~abbr, frame = ~month,
+  color = ~new_death_per100k, colors = 'Blues',
+  zmin = 0, zmax = max_new_death_per100k
+)
+fig <- fig %>% colorbar(title = "Death per 100k")
+fig <- fig %>% layout(
+  title = 'New monthly deaths per 100k population',
+  geo = g,
+  hoverlabel = list(bgcolor="white")
+)
+
+fig
+```
+
+# COVID factor
+
+We now try to build a good parsimonious model to find possible factors related to death rate on county level. Let us not take time series into account for the moment and use the total number as of *Feb 1, 2021*.
+
+i) Create the response variable `total_death_per100k` as the total of number of COVID deaths per 100k by *Feb 1, 2021*. We suggest to take log transformation as `log_total_death_per100k = log(total_death_per100k + 1)`. Merge `total_death_per100k` to `county_data` for the following analysis.
+
+ii) Select possible variables in `county_data` as covariates. We provide `county_data_sub`, a subset variables from `county_data`, for you to get started. Please add any potential variables as you wish. 
+
+a) Report missing values in your final subset of variables. 
+
+b) In the following anaylsis, you may ignore the missing values.
+
+```{r}
+county_data_sub <- county_data %>%
+  select(County, State, FIPS, Deep_Pov_All, PovertyAllAgesPct, PerCapitaInc, UnempRate2019, PctEmpFIRE, PctEmpConstruction, PctEmpTrans, PctEmpMining, PctEmpTrade, PctEmpInformation, PctEmpAgriculture, PctEmpManufacturing, PctEmpServices, PopDensity2010, OwnHomePct, Age65AndOlderPct2010, TotalPop25Plus, Under18Pct2010, Ed2HSDiplomaOnlyPct, Ed3SomeCollegePct, Ed4AssocDegreePct, Ed5CollegePlusPct, ForeignBornPct, Net_International_Migration_Rate_2010_2019, NetMigrationRate1019, NaturalChangeRate1019, TotalPopEst2019, WhiteNonHispanicPct2010, NativeAmericanNonHispanicPct2010, BlackNonHispanicPct2010, AsianNonHispanicPct2010, HispanicPct2010, Type_2015_Update, RuralUrbanContinuumCode2013, UrbanInfluenceCode2013, Perpov_1980_0711, HiCreativeClass2000, HiAmenity, Retirement_Destination_2015_Update)
+```
+
+iii) Use LASSO to choose a parsimonious model with all available sensible county-level information. **Force in State** in the process. Why we need to force in State? You may use `lambda.1se` to choose a smaller model. 
+
+
+
+```{r}
+# iii) LASSO
+# create Feb 01, 2021 subset
+covid_county_0201 <- covid_rate %>% 
+  filter(date == "2021-02-01") %>% 
+  mutate(log_death_rate = log(cum_deaths/TotalPopEst2019*1e5+1)) %>%
+  select(FIPS, log_death_rate)
+
+# join with county-level demographic data
+covid_county_0201 <- left_join(covid_county_0201,
+                               county_data, 
+                               by = "FIPS")
+
+# drop rows with missing using complete.cases() or drop_na()
+# covid_county_0201 <- covid_county_0201[complete.cases(covid_county_0201),]
+
+# select a subset
+covid_county_0201 %<>%
+  select(log_death_rate, State, Deep_Pov_All, PovertyAllAgesPct, PerCapitaInc, UnempRate2019, PctEmpFIRE, PctEmpConstruction, PctEmpTrans, PctEmpMining, PctEmpTrade, PctEmpInformation, PctEmpAgriculture, PctEmpManufacturing, PctEmpServices, PopDensity2010, OwnHomePct, Age65AndOlderPct2010, TotalPop25Plus, Under18Pct2010, Ed2HSDiplomaOnlyPct, Ed3SomeCollegePct, Ed4AssocDegreePct, Ed5CollegePlusPct, ForeignBornPct, Net_International_Migration_Rate_2010_2019, NetMigrationRate1019, NaturalChangeRate1019, TotalPopEst2019, WhiteNonHispanicPct2010, NativeAmericanNonHispanicPct2010, BlackNonHispanicPct2010, AsianNonHispanicPct2010, HispanicPct2010, Type_2015_Update, RuralUrbanContinuumCode2013, UrbanInfluenceCode2013, Perpov_1980_0711, HiCreativeClass2000, HiAmenity, Retirement_Destination_2015_Update) %>%
+  drop_na()
+
+# get X and y
+X <- model.matrix(log_death_rate~., covid_county_0201)[,-1]
+y  <- covid_county_0201$log_death_rate
+
+# grepl(): use regular expression to locate column with some pattern
+# create indicators: names include State as 0; otherwise 1
+# state_ind <- !(grepl("State", colnames(X)))
+## or we can hard code
+state_ind <- c(rep(0, 48), rep(1, ncol(X)-48))
+
+# cv glmnet
+set.seed(15)
+fit <- cv.glmnet(X, y, nfolds = 10, alpha = 1, penalty.factor = state_ind)
+plot(fit)
+
+# get coef of lambda.1se
+coef.min <- coef(fit, s="lambda.1se")
+coef.min <- coef.min[which(coef.min !=0),][-1]
+var.min <- rownames(as.matrix(coef.min))
+state_ind <- !(grepl("State", var.min))
+
+# get a sub data frame for OLS
+data_lasso_sub <- covid_county_0201 %>%
+  select(log_death_rate, State, var.min[state_ind])
+lm.fit <- lm(log_death_rate~.,data_lasso_sub)
+car::Anova(lm.fit)
+```
+
+
+iv) Use `Cp` or BIC to fine tune the LASSO model from iii). Again **force in State** in the process. 
+
+
+```{r}
+# iv) regsubsets
+
+# get a sub data frame from LASSO output
+# put State in front for force.in
+data_lasso_sub <- covid_county_0201 %>%
+  select(log_death_rate, State, var.min[49:64])
+
+# model.matrix for regsubsets()
+X_lasso_sub <- model.matrix(log_death_rate~., 
+                            data_lasso_sub)[,-1]
+y <- data_lasso_sub$log_death_rate
+
+# max var
+num_max_p <- 30
+# state indicator
+# state_ind <- grepl("State", colnames(X_lasso_sub))
+state_ind <- 1:48
+
+# regsubset
+fit.reg <- regsubsets(x = X_lasso_sub,
+                      y = y,
+                      method = "backward",
+                      force.in = state_ind,
+                      nvmax = sum(state_ind) + num_max_p)
+
+# Plot Cp
+f.e <- summary(fit.reg)
+plot(f.e$cp, xlab="Number of predictors", 
+     ylab="Cp", col="red", pch=16)
+
+# Choose opt model with smallest cp
+opt <- which.min(summary(fit.reg)$cp)
+varcp <- names(f.e$which[opt,])[-1]
+state_ind <- grepl("State", varcp)
+
+# Smallest cp model
+data_cp_sub <- covid_county_0201 %>%
+  select(log_death_rate, State, var.min[!state_ind])
+lm.cp.fit <- lm(log_death_rate~., data_cp_sub)
+car::Anova(lm.cp.fit)
+```
+
+v) If necessary, reduce the model from iv) to a final model with all variables being significant at 0.05 level. Are the linear model assumptions all reasonably met?
+
+
+```{r include=FALSE}
+# iv) Final model using backward selection: removing variable with largest p-value
+## 1st step
+lm.fit.1 <- lm(log_death_rate~.-PovertyAllAgesPct, data_cp_sub)
+car::Anova(lm.fit.1)
+
+## 2nd step 
+### use update() from lm.fit.0 
+lm.fit.2 <- update(lm.fit.1, .~.-PerCapitaInc)
+### or refit
+lm.fit.2 <- lm(log_death_rate~.-PovertyAllAgesPct-PerCapitaInc, data_cp_sub)
+car::Anova(lm.fit.2)
+
+## 3rd step
+lm.fit.3 <- lm(log_death_rate~.-PovertyAllAgesPct-PerCapitaInc-PctEmpManufacturing, data_cp_sub)
+car::Anova(lm.fit.3)
+```
+
+```{r}
+## Final model
+lm.fit.final <- lm.fit.3
+car::Anova(lm.fit.final)
+
+# diagnostic plot
+plot(lm.fit.final, 1:2)
+```
+
+vi) It has been shown that COVID affects elderly the most. It is also claimed that the COVID death rate among African Americans and Latinxs is higher. Does your analysis support these arguments?
+
+vii) Based on your final model, summarize your findings. In particular, summarize the state effect controlling for others. Provide intervention recommendations to policy makers to reduce COVID death rate.
+
+```{r}
+# get coef of the final model
+coef.final <- coef(lm.fit.final)
+coef.name.final <- names(coef.final)
+
+# locate state variables by hard coding or regular expression
+state_ind <- 2:49
+state_ind <- grep("State", coef.name.final)
+
+# rank state coef
+statecoef <- data.table(state = coef.name.final[state_ind],
+                        coef = coef.final[state_ind])
+statecoef[order(-coef)]
+```
+
+```{r}
+# use substr() to get the state abbr
+# add the base level back
+tmp <- statecoef %>%
+  mutate(state = substr(state, 6, 8)) %>%
+  add_row(state = "AL", coef = 0)
+
+plot_usmap(
+  data = tmp, 
+  regions = "state", 
+  values = "coef", 
+  exclude = c("Hawaii", "Alaska"), 
+  color = "black") + 
+  scale_fill_continuous(
+    low = "white", high = "blue", 
+    name = "State effect", label = scales::comma) + 
+  labs(title = "State effect") +
+  theme(legend.position = "right") 
+```
+
+
+viii) What else can we do to improve our model? What other important information we may have missed? 
+

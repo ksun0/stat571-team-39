@@ -1,0 +1,382 @@
+---
+title: "COVID-19 Case Study Midterm"
+author: "Shannon Duncan"
+date: "6:00-9:00PM (ET), 03/29/2021"
+output:
+  html_document:
+    code_folding: show
+    highlight: haddock
+    number_sections: no
+    theme: lumen
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+  pdf_document:
+    number_sections: no
+    toc_depth: '4'
+  word_document:
+    toc: yes
+    toc_depth: '4'
+urlcolor: blue
+---
+
+```{r Setup, include=FALSE, results='hide', warning=FALSE}
+knitr::opts_chunk$set(echo = T, fig.width=8, fig.height=4)
+options(scipen = 0, digits = 3)  # controls base R output
+
+# Package setup
+#if(!require("pacman")) install.packages("pacman")
+
+# add packages if needed
+pacman::p_load(tidyverse, dplyr, ggplot2, data.table, lubridate, glmnet, car)
+```
+
+
+# Instruction
+
+We have designed a two hour exam as planned. Due to virtual environment, we will allow anyone to stay for a three hour period. All the teaching team will be available from 6:00 - 9:00 PM.  The submission will be closed sharp at 9:00PM. 
+
+Midterm Zoom link: https://upenn.zoom.us/j/92401814411?pwd=Q1E3cnBWOWpHNE5zelZXZWRCRHVJQT09
+
+**Instruction:** This midterm requires you to use R. It is completely open book/notes/internet. Write your answers using .rmd format and knitr it into one of the html/pdf/docx format. Show your codes, plots or R-output when needed. You can use `echo = TRUE` to show your codes which is the default setup for this file. If you have trouble formatting the plots, don't worry about it. We are not looking for pretty solutions, rather to see if you are able to make sense out of the data using R. Make sure the compiled pdf/html/docx (only one of them) shows your answers completely and that they are not cut-off. Throughout the exam, you do not need to use any LaTeX or mathematical equations. **Whenever we ask for test at some level, assume all the model assumptions are satisfied.**
+
+**All the answers should be clearly supported by relevant R code or based on the R output**. 
+
+There are 4 questions with various parts:
+
+- **Question 1: 3 parts**
+- **Question 2: 1 part**
+- **Question 3: 5 parts**
+- **Question 4: 5 parts**
+
+
+
+
+**Data needed for the Midterm:** `/canvas/Files/Exams/Midterm/Midterm Spring 2021/data/covid_county_midterm.csv` 
+
+
+
+**Electronic Submission:** Two files needed: your `.rmd` file and a compiled file (either a pdf/html/docx). **Label them with your full name.** In the `Assignments` section, go to the `Midterm` assignment and upload your completed files. If you have trouble to submit the files to canvas email them to lzhao@wharton.upenn.edu and junhui@wharton.upenn.edu. 
+
+**The submission folder will be closed sharp at 9:00PM**. 
+
+
+
+**On Site Help:** 
+
+- Any clarification questions should be posted in the chat to the class.
+
+- If you want to talk to one of us you may do the following (for example, if you are stuck somewhere....We will try to debug for you.)
+
+
+
+    - 5-6 break-out rooms are created
+    - **Raise your hand** (We will send you to an available break-out room one at a time.)
+    - Send a private chat to one of us 
+    - Email to the entire team
+   
+- Our emails:
+
+lzhao@wharton.upenn.edu 
+junhui@wharton.upenn.edu	
+cyfang@wharton.upenn.edu	
+farnik@sas.upenn.edu	
+niparkes@wharton.upenn.edu	
+rosesamk@sas.upenn.edu	
+    
+Linda's cell: 6106590187
+
+# Background
+
+The outbreak of the novel Corona virus disease 2019 (COVID-19) [was declared a public health emergency of international concern by the World Health Organization (WHO) on January 30, 2020](https://www.who.int/dg/speeches/detail/who-director-general-s-statement-on-ihr-emergency-committee-on-novel-coronavirus-(2019-ncov)). Upwards of [112 million cases have been confirmed worldwide, with nearly 2.5 million associated deaths](https://covid19.who.int/). Within the US alone, there have been [over 500,000 deaths and upwards of 28 million cases reported](https://covid.cdc.gov/covid-data-tracker/#trends_dailytrendscases). Governments around the world have implemented and suggested a number of policies to lessen the spread of the pandemic, including mask-wearing requirements, travel restrictions, business and school closures, and even stay-at-home orders. The global pandemic has impacted the lives of individuals in countless ways, and though many countries have begun vaccinating individuals, the long-term impact of the virus remains unclear.
+
+The impact of COVID-19 on a given segment of the population appears to vary drastically based on the socioeconomic characteristics of the segment. In particular, differing rates of infection and fatalities have been reported among different [racial groups](https://www.cdc.gov/coronavirus/2019-ncov/covid-data/investigations-discovery/hospitalization-death-by-race-ethnicity.html), [age groups](https://www.cdc.gov/coronavirus/2019-ncov/covid-data/investigations-discovery/hospitalization-death-by-age.html), and [socioeconomic groups](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7221360/). One of the most important metrics for determining the impact of the pandemic is the death rate, which is the proportion of people within the total population that die due to the the disease. 
+
+
+There are two main goals for this case study. 
+
+1. Number of deaths vary drastically across State. We want to find out how State relate to the death rate.
+
+2. Covid seems to target elder people's lives. Is there evidence in our data to show that proportion of elder people indeed relates to the death at county level. 
+
+
+
+
+
+# 1. Data preparation {-}
+
+To make our case study here simple and manageable in a time fashion, we have assembled a subset of data called: `covid_county_midterm.csv`. It collects county level death rate, labeled as `log_death_rate`, as well as a subset of demographic information based on the two cleaned data:
+
+* **covid_county.csv**: County-level socialeconomic information that combines the above-mentioned 4 datasets: Income (Poverty level and household income), Jobs (Employment type, rate, and change), People (Population size, density, education level, race, age, household size, and migration rates), County Classifications
+* **covid_rates.csv**: Daily cumulative numbers on infection and fatality for each county
+
+## Death rate
+
+What is a good way to measure Covid death rate? There are quite a number of counties with a very low or none number of deaths. We have created a new measurement of death rate as follows: 
+
+- The total number of death for each county is gathered by November 1st, 2020
+
+- The death rate is calculated as the total number of deaths plus 1 in the county divided by the total population of the county plus 2. We then apply the function log to get the `log_death_rate`. 
+
+## Read data
+
+We are ready to read the data `covid_county_midterm.csv` into R. 
+
+**To simplify the analyses further, we created a subset here called `covid_county_sub` for us to use in the entire case study.** 
+
+```{r read data }
+setwd("~/Downloads")
+covid_county <- fread("data/covid_county_midterm.csv")
+# covid_county <- fread("covid_county_midterm.csv")
+
+covid_county_sub <- covid_county %>%
+  dplyr::select(log_death_rate, State, Deep_Pov_All, PovertyAllAgesPct, PerCapitaInc, UnempRate2019, PctEmpFIRE, PctEmpConstruction, PctEmpTrans, PctEmpMining, PctEmpTrade, PctEmpInformation, PctEmpAgriculture, PctEmpManufacturing, PctEmpServices, PopDensity2010, OwnHomePct, Age65AndOlderPct2010, TotalPop25Plus, Under18Pct2010, Ed2HSDiplomaOnlyPct, Ed3SomeCollegePct, Ed4AssocDegreePct, Ed5CollegePlusPct, ForeignBornPct, Net_International_Migration_Rate_2010_2019, NetMigrationRate1019, NaturalChangeRate1019, TotalPopEst2019, WhiteNonHispanicPct2010, NativeAmericanNonHispanicPct2010, BlackNonHispanicPct2010, AsianNonHispanicPct2010, HispanicPct2010, Type_2015_Update, RuralUrbanContinuumCode2013, UrbanInfluenceCode2013, Perpov_1980_0711, HiCreativeClass2000, HiAmenity, Retirement_Destination_2015_Update)
+```
+
+
+
+# 2. EDA
+
+During the course of pandemic, we have witnessed that many policies are carried out at state level. For example when to reopen after the March lock-down. To see the variability of death rates among states we suggest you to go through the following EDA process.
+
+## Question 1: (3 parts) 
+
+**1)** Create the average `log_death_rate` by State. Show the histogram of the average `log_death_rate` by State. Use no more than three sentences to summarize the variability of the average `log_death_rate` by State.
+
+```{r average death rate, warning=FALSE, message=FALSE}
+
+stateaverage  <- covid_county_sub %>%
+    dplyr::group_by(State) %>%
+    dplyr::mutate(average_log_death_rate = mean(log_death_rate)) %>%
+    dplyr::select(State, average_log_death_rate) %>%
+    dplyr::distinct()
+
+
+ggplot(stateaverage, aes(x=average_log_death_rate)) + geom_histogram() + labs( title = "Histogram of State Average Log Death Rates", x = "Average Log Death Rate", y = "Count")
+
+
+```
+We can see that most of the states have a average log death rate somewhere between about -8.5 and -7. However, there are a few outliers on both sides of the distribution indicating a few states are a bit higher and a bit lower on average death rate. 
+
+
+**2)**  To see within `State` county level variability, make box-plots `log_death_rate` by `State`. Use no more than two lines to describe the variability of `log_death_rate` by `State`.
+
+```{r boxplot death rate}
+
+boxplot  <- covid_county_sub %>%
+    dplyr::group_by(State) %>%
+    ggplot() + 
+    geom_boxplot(aes(x=State, y=log_death_rate, fill = State)) + 
+    labs(title= "Log Death Rate by State")
+
+boxplot
+
+```
+
+The distributions vary greatly by state - some states like New York have a very large range of values, while some states like Florida have a much smaller range. Furthermore, some states are more normally distributed without outliers like Illinois while others are skewed with outliers like Ohio. 
+
+
+**3)** What is the state with the highest average `log_death_rate`, and what is this rate?
+
+```{r highest average death rate, warning=FALSE}
+
+stateaverage$State[which.max(stateaverage$average_log_death_rate)]
+max(stateaverage$average_log_death_rate)
+
+
+```
+
+The state with the highest average log death rate is New Jersey and that log death rate average is -6.47. 
+
+# 3. Analyses
+
+In the following analyses, we try to find out factors related to `log_death_rate`. 
+
+## 3.1 fit1: `Age`  and  `log_death_rate`
+
+There are a number of studies indicating covid claimed most of elder lives. Let us start with a simple regression of `log_death_rate` vs. `Age65AndOlderPct2010`.
+
+
+```{r simple regression age, warning=FALSE}
+
+fit1 <- lm(log_death_rate ~ Age65AndOlderPct2010, data = covid_county_sub)
+
+```
+
+
+
+## Question 2: (1 part)  
+
+**1)** Is `Age65AndOlderPct2010` a significant variable at .01 level in this analysis? Show the p-value. 
+
+```{r simple regression age printout, warning=FALSE}
+
+summary(fit1)
+
+```
+
+Percentage of the population age 65 or older in 2010 does not have a significant effect on log death rate with p = 0.96. 
+
+
+## 3.2 fit2: `Age` and `log_death_rate` controlling for `State`
+
+
+```{r multiple regression age and state, warning=FALSE}
+
+fit2 <- lm(log_death_rate ~ Age65AndOlderPct2010 + State, data = covid_county_sub)
+summary(fit2)
+
+```
+
+## Question 3: (5 parts)
+
+How do `Age65AndOlderPct2010` and `State` collectively affect `log_death_rate`. In `fit2`, run a linear model of `log_death_rate` vs `State` and `Age65AndOlderPct2010` (without interactions). 
+
+**1)**  Is `Age65AndOlderPct2010` significant at .01 level in this model? 
+
+As shown above, when controlling for state, percent of the population age 65 or older significantly effects log death rate at the 0.01 level with p = 0.0002. 
+
+**2)** How to interpret the coefficient of `Age65AndOlderPct2010` over the `log_death_rate` in `fit2`?  How would you explain the difference in effects of `Age65AndOlderPct2010` in `fit1` vs `fit2`. (No more than 3 sentences).
+
+They are different because they have different meaning and State contributes to a large amount of variance in the log death rate - meaning without holding it constant other variables may appear inconsequential. In `fit2`, on average, when percent of the population age 65 or older increases by 1 percentage point, log death rate will increase by about 0.01, when the effect of State is held constant (this effect is the same of all States since no interaction). However, in `fit1`, on average, when percent of the population age 65 or older increases by 1 percentage point, log death rate will decrease by about 0.0002. 
+
+**3)** Perform a test to see if  `State` is significant in this model at .01 level? 
+
+```{r multiple regression age and state anova, warning=FALSE}
+
+anova(fit1, fit2)
+
+```
+
+We can see from the above ANOVA comparing the reduced model (without State) to the full model (with State) that State has a significant effect on log death rate. 
+
+**4)** Based on `fit2`, what is the estimated `log_death_rate` for a county in `NJ` and `AL` given `Age65AndOlderPct2010 = 20` respectively. Note that the base level of `State` is `AL`. **Show your formula and evaluate the final values. Do not use predict() in this question.**
+
+    a) For NJ: `log_death_rate = -7.46913 + (0.01343 * 20) + (0.81708 *1) = -6.38`.
+    
+    b) For AL: `log_death_rate = -7.46913 + (0.01343 * 20) = -7.2`.
+
+**5)** Are the linear model assumptions reasonably met in `fit2`? Provide residual and normal plots for `fit2`. Use no more than three sentences summarizing your model diagnoses. 
+
+```{r multiple regression model assumptions, warning=FALSE}
+
+par(mfrow=c(1,2), mar=c(5,2,4,2), mgp=c(3,0.5,0))# plot(fit3) produces several plots
+plot(fit2, 1, pch=16)# residual plot
+abline(h=0, col="blue", lwd=2)
+plot(fit2, 2)# qqplot
+
+
+
+```
+
+I think the linear model assumptions are reasonably met. The residuals follow a fairly symmetric pattern about h = 0 and while there is some grouping and very mild funneling, they are decently evenly distributed within a band. While the ends of the qq plot could indicate some skewness for the normality assumption, it's not particularly extreme and the line is pretty straight so I'm not overly concerned about it. 
+
+
+## 3.3 fit.final
+
+In this section, using all possible variables available in `covid_county_sub`, we will build a final parsimonious model and to identify a set of important variables that are related to the `log_death_rate`. We will not fine-tune the final model. 
+
+As you have seen `State` effect explains a large portion of variability in `log_death_rate`, we will lock `State` in all the analyses. 
+
+
+## Question 4: (5 parts)
+
+**Important Remark:** You are going to run LASSO to pick up a few variables in addition to the `State`. In case you can't get LASSO to work go to **2)** directly and use the following set of variables to get your `fit.final`: State, PctEmpServices, PopDensity2010, Age65AndOlderPct2010, WhiteNonHispanicPct2010, HiCreativeClass2000. (Note: this is not necessarily the LASSO output.)
+
+
+**1)**  Use LASSO to pick up a few variables in addition to `State`. List variables output from the above LASSO. 
+
+To be specific let us control the following settings to get the same results. 
+
+* Use set.seed(1) to control the cross-validation errors.
+* Use 10-fold cross validations.
+* Force `State` in all the LASSO models.
+* Pick up the final set of variables using  `lambda.1se` 
+
+```{r, results=='TRUE'}
+
+Y <- as.matrix(covid_county_sub[, 'log_death_rate']) # extract Y
+X <- model.matrix(log_death_rate~., data=covid_county_sub)[, -1]
+# remove the first col of model.matrix is vector 1
+dim(X)
+# colnames(X)   # X[1:2, 1:5] 
+
+```
+
+
+```{r}
+
+library(glmnet)
+#fit.lambda <- glmnet(X, Y, alpha=1) # take advantage of lasso and ridge!
+#str(fit.lambda)
+#fit.lambda$lambda # see the default proposal of lambda's #fit.fl.lambda$beta
+
+#plot(fit.lambda)  
+```
+
+```{r}
+
+set.seed(1)  # to control the ramdomness in K folds 
+fit.cv <- cv.glmnet(X, Y, alpha=1, nfolds=10, intercept = T,
+                       penalty.factor = c(rep(0,48), rep(1, ncol(X)-48))) 
+
+#names(fit.cv); summary(fit.cv)
+
+
+coef.min <- coef(fit.cv, s="lambda.1se")  #s=c("lambda.1se","lambda.min") or lambda value
+coef.min <- coef.min[which(coef.min !=0),]   # get the non=zero coefficients
+var.min <- rownames(as.matrix(coef.min))[-1] # output the names  dim(as.matrix(coef.min))
+var.min
+
+
+``` 
+
+
+
+**2)** Run a final model `fit.final` of `log_death_rate` vs `State` and the set of variables obtained from your LASSO output. Also include `Age65AndOlderPct2010` regardless whether it is in your LASSO output or not. (You can easily specify the lm() variables without any algorithm.)
+
+Report the summary of `fit.final`. 
+
+```{r}
+
+fit.final <- lm(log_death_rate ~ State + PctEmpAgriculture  + PctEmpServices + PopDensity2010 +        Age65AndOlderPct2010  + TotalPop25Plus + Ed3SomeCollegePct + Ed5CollegePlusPct + ForeignBornPct +        
++ NetMigrationRate1019+ WhiteNonHispanicPct2010 + Type_2015_Update, data = covid_county_sub)
+
+summary(fit.final)
+```
+
+**3)** Is `State` significant at .01 level in this model? Is `Age65AndOlderPct2010` significant at .01 level in this model? 
+
+```{r}
+
+car::Anova(fit.final)
+
+
+```
+
+As you can see from the ANOVA output above, State is significant at the .01 level in this model. Age is also significant at the the 0.01 level in this model. 
+
+**4)** Controlling for all other variables in `fit.final`, which state has the highest `log_death_rate` and what is the value?
+
+```{r}
+
+fit.final.nointercept <- (lm(log_death_rate ~ 0 + State + PctEmpAgriculture  + PctEmpServices + PopDensity2010 +  Age65AndOlderPct2010  + TotalPop25Plus + Ed3SomeCollegePct + Ed5CollegePlusPct + ForeignBornPct +        
++ NetMigrationRate1019+ WhiteNonHispanicPct2010 + Type_2015_Update, data = covid_county_sub))
+
+finalcoef <- as.data.frame(fit.final.nointercept$coefficients) 
+
+finalcoef <- tibble::rownames_to_column(finalcoef, "term")
+arrange(finalcoef, desc(fit.final.nointercept$coefficients))
+
+
+```
+
+The state with the highest log death rate is still New Jersey, and it is -5.6. 
+
+**5)** Assume all linear model assumptions are met. Write a brief summary of your findings based on `fit.final`. (No more than 4 lines after compiled)
+
+Overall, we find that multiple factors contribute to county level log death rates during the COVID-19 pandemic. State creates a large amount of variation in the log death rates, with some states having higher or lower averages, and higher or lower amounts of variation. When we control for variation by State, we see some county level demographics have a significant effect on log death rates. The percent of people 16 and over employed in agriculture, population density, percent of population age 65 and older, and total population 25 and older all have significant positive effects on the log death rate - in other words, when they increase, the death rate increases. On the other hand, percent of people with some college, percent of people with 4 years or more of college, net migration rate, percent of people that are non-hispanic white, and economic typology all have a significant negative effect on the log death rate - in other words, when they increase, log death rate decreases. 
+
+
+**End** of the case study!!!!
+
