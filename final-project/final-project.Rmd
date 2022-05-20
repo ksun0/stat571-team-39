@@ -1,0 +1,176 @@
+---
+title: "Modern Data Mining - Final Project"
+author:
+- Liming Ning
+- Hansen Wang
+- William Walsh
+- Kevin Sun
+date: 'Due: 11:59Pm,  5/01, 2022'
+output:
+  html_document:
+    code_folding: show
+    highlight: haddock
+    theme: lumen
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+  pdf_document:
+    toc: yes
+    toc_depth: '4'
+  word_document:
+    toc: yes
+    toc_depth: '4'
+urlcolor: blue  
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.height=4, fig.width=6, warning = F)
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(randomForest, tree, ISLR, rpart, rattle, pROC, partykit, ggplot2, glmnet, leaps, dplyr, keras, neuralnet, imager, ranger,tidyverse, car, data.table, summarytools, rpart.plot, r.part, tensorflow)
+```
+
+## 1. data
+
+```{r}
+# data_split <- function(df, cuts, prob, ...)
+# {
+#   idx <- sample(seq(1, cuts), size = nrow(df), replace = TRUE, prob = prob, ...)
+#   z = list()
+#   for (i in 1:cuts)
+#     z[[i]] <- df[idx == i,]
+#   z
+# }
+# data <- fread("data/news.csv")
+# split <- data_split(data, 3, c(0.8, .1, .1))
+# 
+# train <- split[1][[1]]
+# test <- split[2][[1]]
+# val <- split[3][[1]]
+
+train <- fread("data/train.csv")
+test <- fread("data/test.csv")
+val <- fread("data/val.csv")
+lookup <- c("TRUE" = 0, "Fake" = 1)
+train$Label <- lookup[train$Label]
+test$Label <- lookup[test$Label]
+val$Label <- lookup[val$Label]
+```
+
+```{r}
+x_train <- copy(train)
+y_train <- x_train$Label
+# y_train <-x_train[,1]
+x_train <- subset(x_train, select = -c(Label))
+
+x_test <- copy(test)
+y_test <- x_test$Label
+# y_test <-x_test[,1]
+x_test <- subset(x_test, select = -c(Label))
+
+x_val <- copy(val)
+y_val <- x_val$Label
+# y_val <-x_val[,1]
+x_val <- subset(x_val, select = -c(Label))
+
+y_train_oneh <- to_categorical(y_train, num_classes = 2)
+y_test_oneh <- to_categorical(y_test, num_classes = 2)
+y_val_oneh <- to_categorical(y_val, num_classes = 2)
+x_train <- as.matrix(x_train)
+x_test <- as.matrix(x_test)
+x_val <- as.matrix(x_val)
+x_train <- unname(x_train)
+x_test <- unname(x_test)
+x_val <- unname(x_val)
+```
+## 2. keras model
+```{r}
+model <- keras_model_sequential()
+
+# model <- keras_model_sequential()
+# model %>%
+#   layer_embedding(input_dim = 500, output_dim = 32) %>%
+#   layer_simple_rnn(units = 32) %>% 
+#   layer_dense(units = 1, activation = "sigmoid")
+
+model %>%
+  layer_embedding(input_dim = 293, output_dim = 32) %>%
+  layer_simple_rnn(units = 32,return_sequences = TRUE,activation = 'relu') %>% 
+  layer_simple_rnn(units = 32,return_sequences = TRUE,activation = 'relu') %>% 
+  layer_simple_rnn(units = 32) %>% 
+  layer_dense(units = 1, activation = "sigmoid")
+
+model %>% compile(optimizer = "rmsprop",
+                  loss = "binary_crossentropy",
+                  metrics = c("acc"))
+
+history <- model %>% fit(x_train, y_train,
+                         epochs = 4,
+                         batch_size = 128,
+                         validation_data = list(x_val, y_val))
+print(history)
+```
+```{r}
+model %>% evaluate(x_train, y_train) 
+
+pred <- predict(model, x_train) 
+table(Predicted=pred, Actual=y_train)   
+
+model %>% evaluate(x_test, y_test) 
+
+pred1 <- predict(model, x_test) 
+table(Predicted=pred1, Actual=y_test) 
+```
+
+## LSTM
+```{r}
+model %>%
+  layer_embedding(input_dim = 293, output_dim = 32) %>%
+  layer_lstm(units = 32,return_sequences = TRUE) %>% 
+  layer_lstm(units = 32,return_sequences = TRUE) %>%
+  layer_lstm(units = 32) %>%
+  layer_dense(units = 1, activation = "sigmoid")
+
+model %>% compile(optimizer = "adam",
+                  loss = "binary_crossentropy",
+                  metrics = c("acc"))
+
+history <- model %>% fit(x_train, y_train,
+                         epochs = 25,
+                         batch_size = 128,
+                         validation_data = list(x_val, y_val))
+print(history)
+```
+
+```{r}
+model %>% evaluate(x_train, y_train) 
+
+model %>% evaluate(x_test, y_test) 
+```
+## Bidirectional LSTM
+```{r}
+model %>%
+layer_embedding(input_dim = 293, output_dim = 32) %>%
+layer_lstm(units = 32,return_sequences = TRUE) %>%
+layer_lstm(units = 32,return_sequences = TRUE) %>%
+bidirectional(layer_lstm(units = 32)) %>%
+layer_dense(units = 1, activation = "sigmoid")
+
+model %>% compile(optimizer = "rmsprop",
+                  loss = "binary_crossentropy",
+                  metrics = c("acc"))
+
+history <- model %>% fit(x_train, y_train,
+                         epochs = 25,
+                         batch_size = 128,
+                         validation_data = list(x_val, y_val))
+print(history)
+```
+
+```{r}
+model %>% evaluate(x_train, y_train) 
+
+model %>% evaluate(x_test, y_test) 
+```
+
+## References
+# https://www.r-bloggers.com/2021/04/lstm-network-in-r/
